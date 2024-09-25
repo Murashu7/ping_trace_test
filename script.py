@@ -187,7 +187,7 @@ def convert_to_dict(df):
 # テスト実行
 def main():
     # CSVファイルの読み込み
-    csv_file = 'network_test_evaluation.csv'  # CSVファイルのパスを指定
+    csv_file = 'files/network_test_evaluation.csv'  # CSVファイルのパスを指定
 
     # pandasでCSVを読み込む
     df = pd.read_csv(csv_file)
