@@ -104,7 +104,6 @@ async def ping_multiple_hosts(kyoten_name, test_type, list_ping_eval, results_di
         tasks.append(task)
     return await asyncio.gather(*tasks)
 
-# TODO: num, kyoten_name, test_type
 async def process_ping(kyoten_name, test_type, index, host, expected_status, results_dir):
     """個別のホストのpingを処理"""
     # TODO: 1_拠点名_試験名の結果.log
@@ -220,24 +219,26 @@ def select_kyoten(df):
     return selected_kyoten_name, selected_kyoten_type
 
 def select_test_type(selected_kyoten_type):
+    numbers = []
+    
     # 画面に全ての試験内容を表示
     print("試験内容を表示します:")
     if selected_kyoten_type == '大規模':
-        numbers = [1, 2, 3, 4, 5]
-        types = ['正常性試験・復旧試験・L2SW試験', '帯域保証網試験', 'ベストエフォート網試験', 'ルータ1号機', 'ルータ2号機']
-        for index, row in enumerate(types):
-            print(f"番号: {index+1}, {row}")
+        types = ['正常性試験', '帯域保証網試験', 'ベストエフォート網試験', 'ルータ1号機', 'ルータ2号機', '復旧試験', 'L2SW試験']
+        for index, row in enumerate(types, start=1):
+            numbers.append(index)
+            print(f"番号: {index}, {row}")     
     elif selected_kyoten_type == '中規模':
-        numbers = [1, 2, 3]
-        types = ['正常性試験・復旧試験・L2SW試験', '帯域保証網試験', 'ベストエフォート網試験']
-        for index, row in enumerate(types):
-            print(f"番号: {index+1}, {row}")
+        types = ['正常性試験', '帯域保証網試験', 'ベストエフォート網試験', '復旧試験', 'L2SW試験']
+        for index, row in enumerate(types, start=1):
+            numbers.append(index)
+            print(f"番号: {index}, {row}")
     elif selected_kyoten_type == '小規模':
-        numbers = [1, 2]
-        types = ['正常性試験・復旧試験・L2SW試験', 'ベストエフォート網試験']
-        for index, row in enumerate(types):
-            print(f"番号: {index+1}, {row}")
-    # TODO: その他拠点
+        types = ['正常性試験', 'ベストエフォート網試験', '復旧試験', 'L2SW試験']
+        for index, row in enumerate(types, start=1):
+            numbers.append(index)
+            print(f"番号: {index}, {row}")
+    # TODO: その他拠点（試験方法未定）
     else:
         print("その他拠点は試験ができません。")
         return
@@ -278,37 +279,37 @@ def main():
     
     # 拠点のタイプから判定表を指定する
     if selected_kyoten_type == "大規模":
-        if selected_test_type == "常性試験・復旧試験・L2SW試験":
-            csv_net_test_eval = '../files/network_test_evaluation.csv'  # CSVファイルのパスを指定
+        if selected_test_type == "常性試験" or selected_test_type == "復旧試験" or selected_test_type == "L2SW試験":
+            csv_path = '../files/network_test_evaluation.csv'
         elif selected_test_type == "帯域保証網試験":
-            csv_net_test_eval = '../files/network_test_evaluation.csv'  # CSVファイルのパスを指定
+            csv_path = '../files/network_test_evaluation.csv'
         elif selected_test_type == "ベストエフォート網試験":
-            csv_net_test_eval = '../files/network_test_evaluation.csv'  # CSVファイルのパスを指定
+            csv_path = '../files/network_test_evaluation.csv'
         elif selected_test_type == "ルータ1号機":
-            csv_net_test_eval = '../files/network_test_evaluation.csv'  # CSVファイルのパスを指定
+            csv_path = '../files/network_test_evaluation.csv'
         else:
-            csv_net_test_eval = '../files/network_test_evaluation.csv'  # CSVファイルのパスを指定
+            csv_path = '../files/network_test_evaluation.csv'
     elif selected_kyoten_type == "中規模":
-        if selected_test_type == "常性試験・復旧試験・L2SW試験":
-            csv_net_test_eval = '../files/network_test_evaluation.csv'  # CSVファイルのパスを指定
+        if selected_test_type == "常性試験" or selected_test_type == "復旧試験" or selected_test_type == "L2SW試験":
+            csv_path = '../files/network_test_evaluation.csv'
         elif selected_test_type == "帯域保証網試験":
-            csv_net_test_eval = '../files/network_test_evaluation.csv'  # CSVファイルのパスを指定
+            csv_path = '../files/network_test_evaluation.csv'
         else:
-            csv_net_test_eval = '../files/network_test_evaluation.csv'  # CSVファイルのパスを指定
+            csv_path = '../files/network_test_evaluation.csv'
     elif selected_kyoten_type == "小規模":
-        if selected_test_type == "常性試験・復旧試験・L2SW試験":
-            csv_net_test_eval = '../files/network_test_evaluation.csv'  # CSVファイルのパスを指定
+        if selected_test_type == "常性試験" or selected_test_type == "復旧試験" or selected_test_type == "L2SW試験":
+            csv_path = '../files/network_test_evaluation.csv'
         else:
-            csv_net_test_eval = '../files/network_test_evaluation.csv'  # CSVファイルのパスを指定
+            csv_path = '../files/network_test_evaluation.csv'
     # TODO: その他拠点
     else:
         return
     
     # pandasでCSVを読み込む
-    df_csv_net_test_eval = pd.read_csv(csv_net_test_eval)
+    df_net_test_eval = pd.read_csv(csv_path)
 
     # 複数のホストと期待されるpingの結果とtrace経路のリスト
-    list_ping_eval, list_trace_eval = convert_to_list(df_csv_net_test_eval)
+    list_ping_eval, list_trace_eval = convert_to_list(df_net_test_eval)
     ping_results, trace_results = asyncio.run(ping_trace_multiple_hosts(list_ping_eval, list_trace_eval, selected_kyoten_name, selected_test_type))
 
     print(ping_results, trace_results)
