@@ -87,7 +87,6 @@ async def ping(host):
 
 async def process_ping(kyoten_name, test_type, index, host, expected_status, results_dir):
     """個別のホストのpingを処理"""
-    # TODO: 1_拠点名_試験名の結果.log
     full_output_path = os.path.join(results_dir, f'{index}_{kyoten_name}_{test_type}の結果.log')
     p_current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
