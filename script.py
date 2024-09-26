@@ -19,9 +19,9 @@ def extract_ips(trace_result):
     return ip_addresses
 
 # 共通の要素があるかどうかをチェックする関数
-def check_route_match(ip_list, expected_route):
+def check_route_match(list_ip, list_expected_route):
     # リストをsetに変換して共通要素を探す
-    return bool(set(ip_list) & set(expected_route))
+    return bool(set(list_ip) & set(list_expected_route))
 
 async def ping(host):
     """pingコマンドを非同期で実行"""
@@ -83,29 +83,32 @@ def validate_ping(output, expected_status, max_rtt=100, max_packet_loss=20):
         print(f"失敗 (パケットロス: {loss_percentage}%, 平均RTT: {avg_rtt} ms)")
         return False
 
-def validate_route(output, expected_route):
+def validate_route(output, list_expected_route):
     """
     Tracerouteの出力と期待される経路を比較
     output: トレースルートの出力
-    expected_route: 経路として期待されるホストリスト
+    list_expected_route: 経路として期待されるホストリスト
     """
     if output is None:
         return False
     # 各ホップのIPアドレスを抽出
-    ip_list = extract_ips(output.splitlines())
-    return check_route_match(ip_list, expected_route)
+    list_ip = extract_ips(output.splitlines())
+    return check_route_match(list_ip, list_expected_route)
 
-async def ping_multiple_hosts(ping_list, results_dir):
+async def ping_multiple_hosts(kyoten_name, test_type, list_ping_eval, results_dir):
     tasks = []
-    for host, expected_status in ping_list.items():
-        task = asyncio.create_task(process_ping(host, expected_status, results_dir))
+    for index, dict_ping_eval in enumerate(list_ping_eval, start=1):
+        host = list(dict_ping_eval.keys())[0]
+        expected_status = dict_ping_eval[host]
+        task = asyncio.create_task(process_ping(kyoten_name, test_type, index, host, expected_status, results_dir))
         tasks.append(task)
-    
     return await asyncio.gather(*tasks)
 
-async def process_ping(host, expected_status, results_dir):
+# TODO: num, kyoten_name, test_type
+async def process_ping(kyoten_name, test_type, index, host, expected_status, results_dir):
     """個別のホストのpingを処理"""
-    full_output_path = os.path.join(results_dir, f'{host}の結果.log')
+    # TODO: 1_拠点名_試験名の結果.log
+    full_output_path = os.path.join(results_dir, f'{index}_{kyoten_name}_{test_type}の結果.log')
     p_current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     print(f"{host} へのpingを確認中...")
@@ -126,17 +129,19 @@ async def process_ping(host, expected_status, results_dir):
     
     return {host: success}
 
-async def trace_multiple_hosts(trace_list, results_dir):
+async def trace_multiple_hosts(kyoten_name, test_type, list_trace_eval, results_dir):
     tasks = []
-    for host, expected_route in trace_list.items():
-        task = asyncio.create_task(process_trace(host, expected_route, results_dir))
+    for index, dict_trace_eval in enumerate(list_trace_eval, start=1):
+        host = list(dict_trace_eval.keys())[0]
+        list_expected_route = dict_trace_eval[host]
+        task = asyncio.create_task(process_trace(kyoten_name, test_type, index, host, list_expected_route, results_dir))
         tasks.append(task)
     
     return await asyncio.gather(*tasks)
 
-async def process_trace(host, expected_route, results_dir):
+async def process_trace(kyoten_name, test_type, index, host, list_expected_route, results_dir):
     """個別のホストのtracerouteを処理"""
-    full_output_path = os.path.join(results_dir, f'{host}の結果.log')
+    full_output_path = os.path.join(results_dir, f'{index}_{kyoten_name}_{test_type}の結果.log')
     t_current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     print(f"{host} の経路を確認中...")
@@ -149,7 +154,7 @@ async def process_trace(host, expected_route, results_dir):
             await f.write(f"{trace_output}")
             await f.write("="*40 + "\n\n")
     
-    success = validate_route(trace_output, expected_route)
+    success = validate_route(trace_output, list_expected_route)
     if success:
         print(f"{host} は期待される経路を通過しました\n")
     else:
@@ -157,32 +162,34 @@ async def process_trace(host, expected_route, results_dir):
     
     return {host: success}
 
-async def ping_trace_multiple_hosts(ping_list, trace_list, selected_name, selected_test_type):
+async def ping_trace_multiple_hosts(list_ping_eval, list_trace_eval, selected_kyoten_name, selected_test_type):
     ping_results = {}
     trace_results = {}
     
-    # ファイルを一階層上の "results/selected_name" フォルダに保存
-    results_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', f'results/{selected_name}/{selected_test_type}')
+    # ファイルを一階層上の "results/selected_kyoten_name" フォルダに保存
+    results_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', f'results/{selected_kyoten_name}/{selected_test_type}')
     
     # フォルダが存在しなければ作成
     os.makedirs(results_dir, exist_ok=True)
     
-    ping_results = await ping_multiple_hosts(ping_list, results_dir)
-    trace_results = await trace_multiple_hosts(trace_list, results_dir)
+    ping_results = await ping_multiple_hosts(selected_kyoten_name, selected_test_type, list_ping_eval, results_dir)
+    trace_results = await trace_multiple_hosts(selected_kyoten_name, selected_test_type, list_trace_eval, results_dir)
     return ping_results, trace_results
 
 # 結果を辞書に変換する関数
-def convert_to_dict(df):
-    ping_list = {}
-    trace_list = {}
+def convert_to_list(df):
+    list_ping_eval = []
+    list_trace_eval = []
     
-    # 各行を辞書に格納
-    for index, row in df.iterrows():
+    for _, row in df.iterrows():
+        dict_ping_eval = {}
+        dict_trace_eval = {}
         dest = row['dest']
-        ping_list[dest] = row['ping_eval']
-        trace_list[dest] = [row['trace_eval_1'], row['trace_eval_2'], row['trace_eval_3']]
-        
-    return ping_list, trace_list
+        dict_ping_eval[dest] = row['ping_eval']
+        dict_trace_eval[dest] = [row['trace_eval_1'], row['trace_eval_2'], row['trace_eval_3']]
+        list_ping_eval.append(dict_ping_eval)
+        list_trace_eval.append(dict_trace_eval)
+    return list_ping_eval, list_trace_eval
 
 def select_kyoten(df):
     # 画面に全てのnumberとnameを表示
@@ -207,10 +214,10 @@ def select_kyoten(df):
 
     # 正しいnumberが選択されたらnameとtypeを変数に格納
     selected_area = selected_row['area'].values[0]
-    selected_name = selected_row['name'].values[0]
+    selected_kyoten_name = selected_row['name'].values[0]
     selected_kyoten_type = selected_row['type'].values[0]
-    print(f"選択された拠点: {selected_name}({selected_kyoten_type})")
-    return selected_name, selected_kyoten_type
+    print(f"選択された拠点: {selected_kyoten_name}({selected_kyoten_type})")
+    return selected_kyoten_name, selected_kyoten_type
 
 def select_test_type(selected_kyoten_type):
     # 画面に全ての試験内容を表示
@@ -266,7 +273,7 @@ def main():
     # CSVファイルの読み込み
     csv_kyoten_list = '../files/kyoten_list.csv' 
     df_kyoten = pd.read_csv(csv_kyoten_list)
-    selected_name, selected_kyoten_type = select_kyoten(df_kyoten)
+    selected_kyoten_name, selected_kyoten_type = select_kyoten(df_kyoten)
     selected_test_type = select_test_type(selected_kyoten_type)
     
     # 拠点のタイプから判定表を指定する
@@ -301,8 +308,8 @@ def main():
     df_csv_net_test_eval = pd.read_csv(csv_net_test_eval)
 
     # 複数のホストと期待されるpingの結果とtrace経路のリスト
-    ping_list, trace_list = convert_to_dict(df_csv_net_test_eval)
-    ping_results, trace_results = asyncio.run(ping_trace_multiple_hosts(ping_list, trace_list, selected_name, selected_test_type))
+    list_ping_eval, list_trace_eval = convert_to_list(df_csv_net_test_eval)
+    ping_results, trace_results = asyncio.run(ping_trace_multiple_hosts(list_ping_eval, list_trace_eval, selected_kyoten_name, selected_test_type))
 
     print(ping_results, trace_results)
 
