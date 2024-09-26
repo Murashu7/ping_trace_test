@@ -43,14 +43,14 @@ async def traceroute(host):
     stdout, _ = await proc.communicate()
     return stdout.decode()
 
-# TODO:
+# TODO:pingの成功判定については仮決め
 def validate_ping(output, expected_status, max_rtt=100, max_packet_loss=20):
     """
     pingの出力と期待される結果を比較
     output: pingの出力
-    expected_status: pingの結果がokかngか判定
-    max_rtt: 100ms以下であることを確認
-    max_packet_loss: 20%以下であることを確認
+    expected_status: pingの結果がOKかNGか判定
+    max_rtt: RTTの閾値(~ms以下であること)
+    max_packet_loss: パケットロスの閾値(~%以下であること）
     """
     if output is None:
         return False
@@ -95,9 +95,9 @@ def validate_route(output, expected_route):
     ip_list = extract_ips(output.splitlines())
     return check_route_match(ip_list, expected_route)
 
-async def ping_multiple_hosts(expected_ping_status, results_dir):
+async def ping_multiple_hosts(ping_list, results_dir):
     tasks = []
-    for host, expected_status in expected_ping_status.items():
+    for host, expected_status in ping_list.items():
         task = asyncio.create_task(process_ping(host, expected_status, results_dir))
         tasks.append(task)
     
@@ -126,9 +126,9 @@ async def process_ping(host, expected_status, results_dir):
     
     return {host: success}
 
-async def trace_multiple_hosts(hosts_with_expected_routes, results_dir):
+async def trace_multiple_hosts(trace_list, results_dir):
     tasks = []
-    for host, expected_route in hosts_with_expected_routes.items():
+    for host, expected_route in trace_list.items():
         task = asyncio.create_task(process_trace(host, expected_route, results_dir))
         tasks.append(task)
     
@@ -136,7 +136,7 @@ async def trace_multiple_hosts(hosts_with_expected_routes, results_dir):
 
 async def process_trace(host, expected_route, results_dir):
     """個別のホストのtracerouteを処理"""
-    full_output_path = os.path.join(results_dir, f'{host}への結果.log')
+    full_output_path = os.path.join(results_dir, f'{host}の結果.log')
     t_current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     print(f"{host} の経路を確認中...")
@@ -157,7 +157,7 @@ async def process_trace(host, expected_route, results_dir):
     
     return {host: success}
 
-async def ping_trace_multiple_hosts(expected_ping_status, hosts_with_expected_routes, selected_name, selected_test_type):
+async def ping_trace_multiple_hosts(ping_list, trace_list, selected_name, selected_test_type):
     ping_results = {}
     trace_results = {}
     
@@ -167,8 +167,8 @@ async def ping_trace_multiple_hosts(expected_ping_status, hosts_with_expected_ro
     # フォルダが存在しなければ作成
     os.makedirs(results_dir, exist_ok=True)
     
-    ping_results = await ping_multiple_hosts(expected_ping_status, results_dir)
-    trace_results = await trace_multiple_hosts(hosts_with_expected_routes, results_dir)
+    ping_results = await ping_multiple_hosts(ping_list, results_dir)
+    trace_results = await trace_multiple_hosts(trace_list, results_dir)
     return ping_results, trace_results
 
 # 結果を辞書に変換する関数
@@ -301,8 +301,8 @@ def main():
     df_csv_net_test_eval = pd.read_csv(csv_net_test_eval)
 
     # 複数のホストと期待されるpingの結果とtrace経路のリスト
-    expected_ping_status, hosts_with_expected_routes = convert_to_dict(df_csv_net_test_eval)
-    ping_results, trace_results = asyncio.run(ping_trace_multiple_hosts(expected_ping_status, hosts_with_expected_routes, selected_name, selected_test_type))
+    ping_list, trace_list = convert_to_dict(df_csv_net_test_eval)
+    ping_results, trace_results = asyncio.run(ping_trace_multiple_hosts(ping_list, trace_list, selected_name, selected_test_type))
 
     print(ping_results, trace_results)
 
