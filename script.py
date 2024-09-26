@@ -23,26 +23,6 @@ def check_route_match(list_ip, list_expected_route):
     # リストをsetに変換して共通要素を探す
     return bool(set(list_ip) & set(list_expected_route))
 
-async def ping(host):
-    """pingコマンドを非同期で実行"""
-    proc = await asyncio.create_subprocess_exec(
-        'ping', '-c', '5', host, 
-        stdout=subprocess.PIPE, 
-        stderr=subprocess.PIPE
-    )
-    stdout, _ = await proc.communicate()
-    return stdout.decode()
-
-async def traceroute(host):
-    """tracerouteコマンドを非同期で実行"""
-    proc = await asyncio.create_subprocess_exec(
-        'traceroute', '-n', '-m 10', host, 
-        stdout=subprocess.PIPE, 
-        stderr=subprocess.PIPE
-    )
-    stdout, _ = await proc.communicate()
-    return stdout.decode()
-
 # TODO:pingの成功判定については仮決め
 def validate_ping(output, expected_status, max_rtt=100, max_packet_loss=20):
     """
@@ -95,14 +75,15 @@ def validate_route(output, list_expected_route):
     list_ip = extract_ips(output.splitlines())
     return check_route_match(list_ip, list_expected_route)
 
-async def ping_multiple_hosts(kyoten_name, test_type, list_ping_eval, results_dir):
-    tasks = []
-    for index, dict_ping_eval in enumerate(list_ping_eval, start=1):
-        host = list(dict_ping_eval.keys())[0]
-        expected_status = dict_ping_eval[host]
-        task = asyncio.create_task(process_ping(kyoten_name, test_type, index, host, expected_status, results_dir))
-        tasks.append(task)
-    return await asyncio.gather(*tasks)
+async def ping(host):
+    """pingコマンドを非同期で実行"""
+    proc = await asyncio.create_subprocess_exec(
+        'ping', '-c', '5', host, 
+        stdout=subprocess.PIPE, 
+        stderr=subprocess.PIPE
+    )
+    stdout, _ = await proc.communicate()
+    return stdout.decode()
 
 async def process_ping(kyoten_name, test_type, index, host, expected_status, results_dir):
     """個別のホストのpingを処理"""
@@ -128,15 +109,25 @@ async def process_ping(kyoten_name, test_type, index, host, expected_status, res
     
     return {host: success}
 
-async def trace_multiple_hosts(kyoten_name, test_type, list_trace_eval, results_dir):
+async def ping_multiple_hosts(kyoten_name, test_type, list_ping_eval, results_dir):
     tasks = []
-    for index, dict_trace_eval in enumerate(list_trace_eval, start=1):
-        host = list(dict_trace_eval.keys())[0]
-        list_expected_route = dict_trace_eval[host]
-        task = asyncio.create_task(process_trace(kyoten_name, test_type, index, host, list_expected_route, results_dir))
+    for index, dict_ping_eval in enumerate(list_ping_eval, start=1):
+        host = list(dict_ping_eval.keys())[0]
+        expected_status = dict_ping_eval[host]
+        task = asyncio.create_task(process_ping(kyoten_name, test_type, index, host, expected_status, results_dir))
         tasks.append(task)
-    
     return await asyncio.gather(*tasks)
+
+
+async def traceroute(host):
+    """tracerouteコマンドを非同期で実行"""
+    proc = await asyncio.create_subprocess_exec(
+        'traceroute', '-n', '-m 10', host, 
+        stdout=subprocess.PIPE, 
+        stderr=subprocess.PIPE
+    )
+    stdout, _ = await proc.communicate()
+    return stdout.decode()
 
 async def process_trace(kyoten_name, test_type, index, host, list_expected_route, results_dir):
     """個別のホストのtracerouteを処理"""
@@ -160,6 +151,16 @@ async def process_trace(kyoten_name, test_type, index, host, list_expected_route
         print(f"{host} は期待される経路を通過しませんでした\n")
     
     return {host: success}
+
+async def trace_multiple_hosts(kyoten_name, test_type, list_trace_eval, results_dir):
+    tasks = []
+    for index, dict_trace_eval in enumerate(list_trace_eval, start=1):
+        host = list(dict_trace_eval.keys())[0]
+        list_expected_route = dict_trace_eval[host]
+        task = asyncio.create_task(process_trace(kyoten_name, test_type, index, host, list_expected_route, results_dir))
+        tasks.append(task)
+    
+    return await asyncio.gather(*tasks)
 
 async def ping_trace_multiple_hosts(list_ping_eval, list_trace_eval, selected_kyoten_name, selected_test_type):
     ping_results = {}
@@ -194,7 +195,7 @@ def select_kyoten(df):
     # 画面に全てのnumberとnameを表示
     print("全てのnumberとnameを表示します:")
     for index, row in df.iterrows():
-        print(f"拠点番号: {row['number']}, エリア: {row['area']}, 拠点名: {row['name']}")
+        print(f"拠点番号: {row['number']}, {row['area']}, {row['name']}")
 
     # ユーザーが正しいnumberを選択するまでループ
     selected_row = None
