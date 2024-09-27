@@ -5,6 +5,21 @@ import datetime
 import os
 import asyncio
 from aiofiles import open as aio_open  # 非同期でファイルを開く
+import yaml
+
+def load_config(config_path='config.yaml'):
+    """
+    設定ファイルを読み込む関数
+    
+    Parameters:
+    - config_path (str): 設定ファイルのパス
+    
+    Returns:
+    - config (dict): 設定内容を含む辞書
+    """
+    with open(config_path, 'r') as file:
+        config = yaml.safe_load(file)
+    return config
 
 # 非同期で結果をログファイルに保存する関数
 async def save_results(kyoten_name, test_type, index, host, output, results_dir, result_type):
@@ -18,16 +33,32 @@ async def save_results(kyoten_name, test_type, index, host, output, results_dir,
             await f.write(f"{host} への {result_type} 結果 {current_time}\n\n")
             await f.write(f"{output}")
             await f.write("="*40 + "\n\n")
-            
+
+async def ping(host):
+    """pingコマンドを非同期で実行"""
+    proc = await asyncio.create_subprocess_exec(
+        'ping', '-c', '5', host, 
+        stdout=subprocess.PIPE, 
+        stderr=subprocess.PIPE
+    )
+    stdout, _ = await proc.communicate()
+    return stdout.decode()
+         
 # TODO:pingの成功判定については仮決め
-def validate_ping(output, expected_status, max_rtt=100, max_packet_loss=20):
+def validate_ping(output, expected_status, config_path='../files/config.yml'):
     """
     pingの出力と期待される結果を比較
     output: pingの出力
     expected_status: pingの結果がOKかNGか判定
-    max_rtt: RTTの閾値(~ms以下であること)
-    max_packet_loss: パケットロスの閾値(~%以下であること）
+    
+    Returns:
+    - bool: 成功ならTrue, 失敗ならFalse
     """
+    # 設定ファイルから閾値を読み込む
+    config = load_config(config_path)
+    max_rtt = config.get('max_rtt', 100)  # デフォルト値
+    max_packet_loss = config.get('max_packet_loss', 20)  # デフォルト値
+    
     if output is None:
         return False
     
@@ -58,17 +89,6 @@ def validate_ping(output, expected_status, max_rtt=100, max_packet_loss=20):
     else:
         print(f"失敗 (パケットロス: {loss_percentage}%, 平均RTT: {avg_rtt} ms)")
         return False
-
-async def ping(host):
-    """pingコマンドを非同期で実行"""
-    proc = await asyncio.create_subprocess_exec(
-        'ping', '-c', '5', host, 
-        stdout=subprocess.PIPE, 
-        stderr=subprocess.PIPE
-    )
-    stdout, _ = await proc.communicate()
-    return stdout.decode()
-
 
 # 非同期でホストへpingを送信し、結果を評価する関数
 async def ping_and_validate(host, expected_status):
@@ -237,107 +257,100 @@ def select_kyoten(df):
             print("無効な入力です。数字を入力してください。")
 
     # 正しいnumberが選択されたらnameとtypeを変数に格納
-    selected_area = selected_row['area'].values[0]
+    # selected_area = selected_row['area'].values[0]
     selected_kyoten_name = selected_row['name'].values[0]
     selected_kyoten_type = selected_row['type'].values[0]
     print(f"選択された拠点: {selected_kyoten_name}({selected_kyoten_type})")
     return selected_kyoten_name, selected_kyoten_type
 
-def select_test_type(selected_kyoten_type):
-    numbers = []
-    
-    # 画面に全ての試験内容を表示
+def select_test_type(selected_kyoten_type, csv_file='../files/test_info.csv'):
+    # CSVファイルを読み込み
+    try:
+        df = pd.read_csv(csv_file)
+    except FileNotFoundError:
+        print("CSVファイルが見つかりません。")
+        return None
+
+    # 指定されたkyoten_typeに基づいて試験タイプを取得
+    test_types = df[df['kyoten_type'] == selected_kyoten_type]['test_type'].tolist()
+
+    if not test_types:
+        print("選択された拠点には試験が設定されていません。")
+        return None
+
+    # 試験内容を表示
     print("試験内容を表示します:")
-    if selected_kyoten_type == '大規模':
-        types = ['正常性試験', '帯域保証網試験', 'ベストエフォート網試験', 'ルータ1号機', 'ルータ2号機', '復旧試験', 'L2SW試験']
-        for index, row in enumerate(types, start=1):
-            numbers.append(index)
-            print(f"番号: {index}, {row}")     
-    elif selected_kyoten_type == '中規模':
-        types = ['正常性試験', '帯域保証網試験', 'ベストエフォート網試験', '復旧試験', 'L2SW試験']
-        for index, row in enumerate(types, start=1):
-            numbers.append(index)
-            print(f"番号: {index}, {row}")
-    elif selected_kyoten_type == '小規模':
-        types = ['正常性試験', 'ベストエフォート網試験', '復旧試験', 'L2SW試験']
-        for index, row in enumerate(types, start=1):
-            numbers.append(index)
-            print(f"番号: {index}, {row}")
-    # TODO: その他拠点（試験方法未定）
-    else:
-        print("その他拠点は試験ができません。")
-        return
-    
-    data = {
-        'number': numbers,
-        'type': types
-    }
-    df = pd.DataFrame(data)
-    
+    for index, test_type in enumerate(test_types, start=1):
+        print(f"番号: {index}, {test_type}")
+
     # ユーザーが正しいnumberを選択するまでループ
     selected_row = None
-    while selected_row is None or selected_row.empty:
+    while selected_row is None:
         try:
             # numberを選択するメッセージを表示
             selected_number = int(input("試験番号を選択してください: "))
             
-            # 選択されたnumberに対応する行を取得
-            selected_row = df[df['number'] == selected_number]
-            
-            if selected_row.empty:
+            if 1 <= selected_number <= len(test_types):
+                selected_row = test_types[selected_number - 1]
+            else:
                 print("選択したnumberは存在しません。もう一度選択してください。")
         except ValueError:
             print("無効な入力です。数字を入力してください。")
 
-    # 正しいnumberが選択されたらnameとtypeを変数に格納
-    selected_test_type = selected_row['type'].values[0]
-    print(f"選択された試験: {selected_test_type}")
-    return selected_test_type
+    print(f"選択された試験: {selected_row}")
+    return selected_row
+
+class SelectionError(Exception):
+    """選択された拠点タイプまたは試験タイプが無効な場合に投げられる例外."""
+    pass
+
+def get_test_type_path(selected_kyoten_type, selected_test_type, test_info_path='../files/test_info.csv'):
+    """
+    test_info.csvを読み込み、選択された拠点タイプと試験タイプに対応するCSVファイルのパスを取得する関数。
+    
+    Parameters:
+    - selected_kyoten_type (str): 選択された拠点タイプ（例: "大規模", "中規模", "小規模"）
+    - selected_test_type (str): 選択された試験タイプ
+    - test_info_path (str): test_info.csvのパス（デフォルト: '../files/test_info.csv'）
+    
+    Returns:
+    - csv_path (str): 該当するテスト結果ファイルのパス
+    """
+    # test_info.csvの読み込み
+    df_test_info = pd.read_csv(test_info_path)
+
+    # selected_kyoten_type と selected_test_type にマッチする file_name を取得
+    matching_row = df_test_info[
+        (df_test_info['kyoten_type'] == selected_kyoten_type) &
+        (df_test_info['test_type'] == selected_test_type)
+    ]
+    
+    if not matching_row.empty:
+        return f"../files/{matching_row['file_name'].values[0]}"
+    else:
+        raise SelectionError("選択された拠点タイプまたは試験タイプが見つかりませんでした。")
 
 # テスト実行
 def main():
-    # CSVファイルの読み込み
-    csv_kyoten_list = '../files/kyoten_list.csv' 
-    df_kyoten = pd.read_csv(csv_kyoten_list)
-    selected_kyoten_name, selected_kyoten_type = select_kyoten(df_kyoten)
-    selected_test_type = select_test_type(selected_kyoten_type)
-    
-    # 拠点のタイプから判定表を指定する
-    if selected_kyoten_type == "大規模":
-        if selected_test_type == "常性試験" or selected_test_type == "復旧試験" or selected_test_type == "L2SW試験":
-            csv_path = '../files/network_test_evaluation.csv'
-        elif selected_test_type == "帯域保証網試験":
-            csv_path = '../files/network_test_evaluation.csv'
-        elif selected_test_type == "ベストエフォート網試験":
-            csv_path = '../files/network_test_evaluation.csv'
-        elif selected_test_type == "ルータ1号機":
-            csv_path = '../files/network_test_evaluation.csv'
-        else:
-            csv_path = '../files/network_test_evaluation.csv'
-    elif selected_kyoten_type == "中規模":
-        if selected_test_type == "常性試験" or selected_test_type == "復旧試験" or selected_test_type == "L2SW試験":
-            csv_path = '../files/network_test_evaluation.csv'
-        elif selected_test_type == "帯域保証網試験":
-            csv_path = '../files/network_test_evaluation.csv'
-        else:
-            csv_path = '../files/network_test_evaluation.csv'
-    elif selected_kyoten_type == "小規模":
-        if selected_test_type == "常性試験" or selected_test_type == "復旧試験" or selected_test_type == "L2SW試験":
-            csv_path = '../files/network_test_evaluation.csv'
-        else:
-            csv_path = '../files/network_test_evaluation.csv'
-    # TODO: その他拠点
-    else:
-        return
-    
-    # pandasでCSVを読み込む
-    df_net_test_eval = pd.read_csv(csv_path)
+    try:
+        # CSVファイルの読み込み
+        csv_kyoten_list = '../files/kyoten_list.csv' 
+        df_kyoten = pd.read_csv(csv_kyoten_list)
+        selected_kyoten_name, selected_kyoten_type = select_kyoten(df_kyoten)
+        selected_test_type = select_test_type(selected_kyoten_type)
+        
+        # pandasで評価用CSVを読み込む
+        df_net_test_eval = pd.read_csv(get_test_type_path(selected_kyoten_type, selected_test_type))
 
-    # 複数のホストと期待されるpingの結果とtrace経路のリスト
-    list_ping_eval, list_trace_eval = convert_to_list(df_net_test_eval)
-    ping_results, trace_results = asyncio.run(ping_trace_multiple_hosts(list_ping_eval, list_trace_eval, selected_kyoten_name, selected_test_type))
+        # 複数のホストと期待されるpingの結果とtrace経路のリスト
+        list_ping_eval, list_trace_eval = convert_to_list(df_net_test_eval)
+        ping_results, trace_results = asyncio.run(ping_trace_multiple_hosts(list_ping_eval, list_trace_eval, selected_kyoten_name, selected_test_type))
 
-    print(ping_results, trace_results)
+        print(ping_results, trace_results)
+        
+    except Exception as e:
+        print(e)  # エラーメッセージを表示
+        return  # 処理を終了
 
 if __name__ == '__main__':
     main()
