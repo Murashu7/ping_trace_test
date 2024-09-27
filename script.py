@@ -6,23 +6,19 @@ import os
 import asyncio
 from aiofiles import open as aio_open  # 非同期でファイルを開く
 
-# IPアドレスを抽出する正規表現
-ip_pattern = re.compile(r'(\d+\.\d+\.\d+\.\d+)')
+# 非同期で結果をログファイルに保存する関数
+async def save_results(kyoten_name, test_type, index, host, output, results_dir, result_type):
+    """pingまたはtracerouteの結果をログファイルに保存"""
+    full_output_path = os.path.join(results_dir, f'{index}_{kyoten_name}_{test_type}の結果.log')
+    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-# IPアドレスを抽出して配列に格納
-def extract_ips(trace_result):
-    ip_addresses = []
-    for hop in trace_result:
-        ip_match = ip_pattern.search(hop)
-        if ip_match:
-            ip_addresses.append(ip_match.group(0))
-    return ip_addresses
-
-# 共通の要素があるかどうかをチェックする関数
-def check_route_match(list_ip, list_expected_route):
-    # リストをsetに変換して共通要素を探す
-    return bool(set(list_ip) & set(list_expected_route))
-
+    # 結果があればログファイルに書き込む
+    if output:
+        async with aio_open(full_output_path, 'a') as f:
+            await f.write(f"{host} への {result_type} 結果 {current_time}\n\n")
+            await f.write(f"{output}")
+            await f.write("="*40 + "\n\n")
+            
 # TODO:pingの成功判定については仮決め
 def validate_ping(output, expected_status, max_rtt=100, max_packet_loss=20):
     """
@@ -63,6 +59,72 @@ def validate_ping(output, expected_status, max_rtt=100, max_packet_loss=20):
         print(f"失敗 (パケットロス: {loss_percentage}%, 平均RTT: {avg_rtt} ms)")
         return False
 
+async def ping(host):
+    """pingコマンドを非同期で実行"""
+    proc = await asyncio.create_subprocess_exec(
+        'ping', '-c', '5', host, 
+        stdout=subprocess.PIPE, 
+        stderr=subprocess.PIPE
+    )
+    stdout, _ = await proc.communicate()
+    return stdout.decode()
+
+
+# 非同期でホストへpingを送信し、結果を評価する関数
+async def ping_and_validate(host, expected_status):
+    """ホストにpingを送信して、結果を評価"""
+    print(f"{host} へのpingを確認中...")
+    ping_output = await ping(host)  # ping関数は非同期で実行
+    print(ping_output)
+
+    # pingの結果をバリデート
+    success = validate_ping(ping_output, expected_status)
+    
+    if success:
+        print(f"{host} へのpingの結果は成功しました\n")
+    else:
+        print(f"{host} へのpingの結果は失敗しました\n")
+    
+    # pingの結果と評価結果を返す
+    return ping_output, success
+
+async def process_ping(kyoten_name, test_type, index, host, expected_status, results_dir):
+    """個別のホストのpingを処理"""
+    # pingを送信して結果を評価
+    ping_output, success = await ping_and_validate(host, expected_status)
+
+    # 結果をログファイルに保存
+    await save_results(kyoten_name, test_type, index, host, ping_output, results_dir, 'ping')
+
+    # 成功/失敗の結果を返す
+    return {host: success}
+
+async def ping_multiple_hosts(kyoten_name, test_type, list_ping_eval, results_dir):
+    tasks = []
+    for index, dict_ping_eval in enumerate(list_ping_eval, start=1):
+        host = list(dict_ping_eval.keys())[0]
+        expected_status = dict_ping_eval[host]
+        task = asyncio.create_task(process_ping(kyoten_name, test_type, index, host, expected_status, results_dir))
+        tasks.append(task)
+    return await asyncio.gather(*tasks)
+
+# IPアドレスを抽出する正規表現
+ip_pattern = re.compile(r'(\d+\.\d+\.\d+\.\d+)')
+
+# IPアドレスを抽出して配列に格納
+def extract_ips(trace_result):
+    ip_addresses = []
+    for hop in trace_result:
+        ip_match = ip_pattern.search(hop)
+        if ip_match:
+            ip_addresses.append(ip_match.group(0))
+    return ip_addresses
+
+# 共通の要素があるかどうかをチェックする関数
+def check_route_match(list_ip, list_expected_route):
+    # リストをsetに変換して共通要素を探す
+    return bool(set(list_ip) & set(list_expected_route))
+
 def validate_route(output, list_expected_route):
     """
     Tracerouteの出力と期待される経路を比較
@@ -75,49 +137,6 @@ def validate_route(output, list_expected_route):
     list_ip = extract_ips(output.splitlines())
     return check_route_match(list_ip, list_expected_route)
 
-async def ping(host):
-    """pingコマンドを非同期で実行"""
-    proc = await asyncio.create_subprocess_exec(
-        'ping', '-c', '5', host, 
-        stdout=subprocess.PIPE, 
-        stderr=subprocess.PIPE
-    )
-    stdout, _ = await proc.communicate()
-    return stdout.decode()
-
-async def process_ping(kyoten_name, test_type, index, host, expected_status, results_dir):
-    """個別のホストのpingを処理"""
-    full_output_path = os.path.join(results_dir, f'{index}_{kyoten_name}_{test_type}の結果.log')
-    p_current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    print(f"{host} へのpingを確認中...")
-    ping_output = await ping(host)
-    print(ping_output)
-    
-    if ping_output:
-        async with aio_open(full_output_path, 'a') as f:
-            await f.write(f"{host}へのping結果 {p_current_time}\n\n")
-            await f.write(f"{ping_output}")
-            await f.write("="*40 + "\n\n")
-    
-    success = validate_ping(ping_output, expected_status)
-    if success:
-        print(f"{host} へのpingの結果は成功しました\n")
-    else:
-        print(f"{host} へのpingの結果は失敗しました\n")
-    
-    return {host: success}
-
-async def ping_multiple_hosts(kyoten_name, test_type, list_ping_eval, results_dir):
-    tasks = []
-    for index, dict_ping_eval in enumerate(list_ping_eval, start=1):
-        host = list(dict_ping_eval.keys())[0]
-        expected_status = dict_ping_eval[host]
-        task = asyncio.create_task(process_ping(kyoten_name, test_type, index, host, expected_status, results_dir))
-        tasks.append(task)
-    return await asyncio.gather(*tasks)
-
-
 async def traceroute(host):
     """tracerouteコマンドを非同期で実行"""
     proc = await asyncio.create_subprocess_exec(
@@ -128,27 +147,33 @@ async def traceroute(host):
     stdout, _ = await proc.communicate()
     return stdout.decode()
 
-async def process_trace(kyoten_name, test_type, index, host, list_expected_route, results_dir):
-    """個別のホストのtracerouteを処理"""
-    full_output_path = os.path.join(results_dir, f'{index}_{kyoten_name}_{test_type}の結果.log')
-    t_current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
+# 非同期でホストへのtracerouteを実行し、結果を評価する関数
+async def trace_and_validate(host, list_expected_route):
+    """ホストにtracerouteを実行して、結果を評価"""
     print(f"{host} の経路を確認中...")
-    trace_output = await traceroute(host)
+    trace_output = await traceroute(host)  # traceroute関数は非同期で実行
     print(trace_output)
-    
-    if trace_output:
-        async with aio_open(full_output_path, 'a') as f:
-            await f.write(f"{host}へのtrace結果 {t_current_time}\n\n")
-            await f.write(f"{trace_output}")
-            await f.write("="*40 + "\n\n")
-    
+
+    # 経路の結果をバリデート
     success = validate_route(trace_output, list_expected_route)
+    
     if success:
         print(f"{host} は期待される経路を通過しました\n")
     else:
         print(f"{host} は期待される経路を通過しませんでした\n")
     
+    # tracerouteの結果と評価結果を返す
+    return trace_output, success
+
+async def process_trace(kyoten_name, test_type, index, host, list_expected_route, results_dir):
+    """個別のホストのtracerouteを処理"""
+    # tracerouteを実行して結果を評価
+    trace_output, success = await trace_and_validate(host, list_expected_route)
+
+    # 結果をログファイルに保存
+    await save_results(kyoten_name, test_type, index, host, trace_output, results_dir, "traceroute")
+
+    # 成功/失敗の結果を返す
     return {host: success}
 
 async def trace_multiple_hosts(kyoten_name, test_type, list_trace_eval, results_dir):
