@@ -322,6 +322,32 @@ def get_test_type_path(selected_kyoten_type, selected_test_type, test_info_path=
     else:
         raise SelectionError("選択された拠点タイプまたは試験タイプが見つかりませんでした。")
 
+# TODO: 出力先は各拠点のテストフォルダ結果内へ保存する
+def write_results_to_excel(ping_results, trace_results, excel_file='../results/ping_trace_results.xlsx'):
+    """
+    pingとtraceの結果をExcelに書き出す関数。
+    
+    Parameters:
+    - ping_results (list of dict): pingの結果 [{'host_a': True}, ...]
+    - trace_results (list of dict): traceの結果 [{'host_a': False}, ...]
+    - excel_file (str): 出力するExcelファイル名
+    """
+    # Excelに書き込むためのリストを作成
+    data = []
+    for i, (ping, trace) in enumerate(zip(ping_results, trace_results), start=1):
+        host = list(ping.keys())[0]  # ホスト名取得
+        ping_result = '○' if list(ping.values())[0] else '×'
+        trace_result = '○' if list(trace.values())[0] else '×'
+        data.append([i, host, ping_result, trace_result])
+
+    # データをDataFrameに変換
+    df = pd.DataFrame(data, columns=['num', 'host', 'ping_result', 'trace_result'])
+
+    # Excelファイルに書き出し
+    df.to_excel(excel_file, index=False)
+
+    print(f"Excelファイル '{excel_file}' に結果が書き込まれました。")
+    
 # テスト実行
 def main():
     try:
@@ -347,7 +373,10 @@ def main():
             selected_kyoten_name = selected_kyoten_name,
             selected_test_type = selected_test_type))
 
-        print(ping_results, trace_results)
+        print(ping_results = f'{ping_results}')
+        print(trace_results = f'{trace_results}')
+        
+        write_results_to_excel(ping_results, trace_results)
         
     except Exception as e:
         print(e)  # エラーメッセージを表示
