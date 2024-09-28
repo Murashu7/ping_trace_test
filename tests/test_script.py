@@ -3,10 +3,12 @@ from unittest.mock import patch, AsyncMock
 import os
 import subprocess
 import pandas as pd
+from unittest import mock
 
 # テスト対象の関数が記載されているモジュールをインポートします
 from script import save_results, extract_ips, check_route_match, validate_ping, validate_route, ping, ping_multiple_hosts, \
-    traceroute, trace_multiple_hosts, convert_to_list, select_kyoten, select_test_type, get_test_type_path, SelectionError
+    traceroute, trace_multiple_hosts, convert_to_list, select_kyoten, select_test_type, get_test_type_path, SelectionError, \
+    generate_unique_filename
 
 @pytest.mark.asyncio
 async def test_save_results_ping(tmpdir):
@@ -133,6 +135,18 @@ def test_validate_ping_ng_case(mock_config_file):
     result = validate_ping(max_rtt=100, max_packet_loss=20, output=output, expected_status='ng')
     assert result is True
 
+def test_validate_ping_ng_but_ok_case(mock_config_file):
+    output = """64 bytes from 192.168.1.1: icmp_seq=1 ttl=64 time=0.032 ms
+64 bytes from 192.168.1.1: icmp_seq=2 ttl=64 time=0.045 ms
+64 bytes from 192.168.1.1: icmp_seq=3 ttl=64 time=0.034 ms
+
+--- 192.168.1.1 ping statistics ---
+3 packets transmitted, 3 received, 0% packet loss, time 2001ms
+round-trip min/avg/max/stddev = 0.032/0.037/0.045/0.001 ms
+"""
+    result = validate_ping(max_rtt=100, max_packet_loss=20, output=output, expected_status='ng')
+    assert result is False
+    
 @pytest.mark.asyncio
 async def test_ping_multiple_hosts():
     # モックする内容
@@ -413,3 +427,53 @@ def test_get_test_type_path_invalid_both(mock_test_info_csv):
     """無効な拠点タイプと試験タイプに対して例外が発生することをテスト"""
     with pytest.raises(SelectionError, match="選択された拠点タイプまたは試験タイプが見つかりませんでした。"):
         get_test_type_path("無効なタイプ", "無効な試験", mock_test_info_csv)
+        
+@mock.patch('os.path.exists')
+def test_generate_unique_filename_first_call(mock_exists):
+    """
+    最初のファイル生成時のテスト: ファイルが存在しない場合、インクリメントされないことを確認。
+    """
+    mock_exists.return_value = False  # ファイルが存在しない場合
+    
+    results_dir = '../files'
+    selected_kyoten_name = 'kyoten_name'
+    selected_test_type = 'test_type'
+    
+    expected_filename = f'{results_dir}/{selected_kyoten_name}_{selected_test_type}_判定表.xlsx'
+    generated_filename = generate_unique_filename(results_dir, selected_kyoten_name, selected_test_type)
+    
+    assert generated_filename == expected_filename
+
+@mock.patch('os.path.exists')
+def test_generate_unique_filename_second_call(mock_exists):
+    """
+    2回目のファイル生成時のテスト: 同じ名前のファイルが存在する場合、(1)が付くことを確認。
+    """
+    # 1回目は存在しないが、2回目は存在する
+    mock_exists.side_effect = [True, False]
+    
+    results_dir = '../files'
+    selected_kyoten_name = 'kyoten_name'
+    selected_test_type = 'test_type'
+    
+    expected_filename = f'{results_dir}/{selected_kyoten_name}_{selected_test_type}_判定表(1).xlsx'
+    generated_filename = generate_unique_filename(results_dir, selected_kyoten_name, selected_test_type)
+    
+    assert generated_filename == expected_filename
+
+@mock.patch('os.path.exists')
+def test_generate_unique_filename_third_call(mock_exists):
+    """
+    3回目のファイル生成時のテスト: 連続してファイルが存在する場合、(2)が付くことを確認。
+    """
+    # 1回目と2回目は存在し、3回目は存在しない
+    mock_exists.side_effect = [True, True, False]
+    
+    results_dir = '../files'
+    selected_kyoten_name = 'kyoten_name'
+    selected_test_type = 'test_type'
+    
+    expected_filename = f'{results_dir}/{selected_kyoten_name}_{selected_test_type}_判定表(2).xlsx'
+    generated_filename = generate_unique_filename(results_dir, selected_kyoten_name, selected_test_type)
+    
+    assert generated_filename == expected_filename

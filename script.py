@@ -37,7 +37,7 @@ async def save_results(kyoten_name, test_type, index, host, output, results_dir,
         async with aio_open(full_output_path, 'a') as f:
             await f.write(f"{host} への {result_type} 結果 {current_time}\n\n")
             await f.write(f"{output}")
-            await f.write("="*40 + "\n\n")
+            await f.write("\n" + "="*60 + "\n")
 
 async def ping(ping_count, host):
     """pingコマンドを非同期で実行"""
@@ -49,16 +49,19 @@ async def ping(ping_count, host):
     stdout, stderr = await proc.communicate()
     return stdout.decode() if stdout else stderr.decode()
          
-# TODO:pingの出力と期待される結果を比較
+# TODO:pingの出力と期待される結果を比較（Windows版では解析処理を変更する必要あり）
 def validate_ping(max_rtt, max_packet_loss, output, expected_status):    
     if output is None:
         return False
     
+    # TODO: expected_status が ng かつ ping が通った場合は以下の処理へ続く
     if expected_status == 'ng':
         if "Request timeout" in output or "Destination Host Unreachable" in output:
             return True
-
-    # パケットロス率の解析
+        else:
+            return False
+            
+    # TODO: パケットロス率の解析
     packet_loss = re.search(r'(\d+)% packet loss', output)
     if packet_loss:
         loss_percentage = int(packet_loss.group(1))  # パケットロス率を整数として取得
@@ -66,7 +69,7 @@ def validate_ping(max_rtt, max_packet_loss, output, expected_status):
         print("パケットロス率を解析できませんでした")
         return False
 
-    # RTT (応答時間) の解析
+    # TODO: RTT (応答時間) の解析
     rtt_match = re.search(r'round-trip min/avg/max/stddev = ([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+) ms', output)
     if rtt_match:
         avg_rtt = float(rtt_match.group(2))  # 平均RTTを取得
@@ -210,7 +213,7 @@ async def ping_trace_multiple_hosts(ping_count, max_rtt, max_packet_loss, list_p
     
     ping_results = await ping_multiple_hosts(ping_count, max_rtt, max_packet_loss,selected_kyoten_name, selected_test_type, list_ping_eval, results_dir)
     trace_results = await trace_multiple_hosts(selected_kyoten_name, selected_test_type, list_trace_eval, results_dir)
-    return ping_results, trace_results
+    return ping_results, trace_results, results_dir
 
 # 結果を辞書に変換する関数
 def convert_to_list(df):
@@ -322,8 +325,35 @@ def get_test_type_path(selected_kyoten_type, selected_test_type, test_info_path=
     else:
         raise SelectionError("選択された拠点タイプまたは試験タイプが見つかりませんでした。")
 
+def generate_unique_filename(results_dir, selected_kyoten_name, selected_test_type):
+    """
+    ファイル名を生成し、重複があれば連番を付与して一意なファイル名を生成する関数。
+    
+    Parameters:
+    - results_dir (str): 保存するディレクトリパス
+    - selected_kyoten_name (str): 拠点名
+    - selected_test_type (str): 試験タイプ
+    
+    Returns:
+    - excel_file (str): 一意なファイル名
+    """
+    # 基本となるファイル名
+    base_filename = f'{selected_kyoten_name}_{selected_test_type}_判定表'
+    extension = '.xlsx'
+    
+    # 最初のファイル名
+    excel_file = os.path.join(results_dir, f'{base_filename}{extension}')
+    
+    # ファイルが存在する場合、インクリメントして一意な名前を生成
+    counter = 1
+    while os.path.exists(excel_file):
+        excel_file = os.path.join(results_dir, f'{base_filename}({counter}){extension}')
+        counter += 1
+    
+    return excel_file
+
 # TODO: 出力先は各拠点のテストフォルダ結果内へ保存する
-def write_results_to_excel(ping_results, trace_results, excel_file='../results/ping_trace_results.xlsx'):
+def write_results_to_excel(ping_results, trace_results, excel_file):
     """
     pingとtraceの結果をExcelに書き出す関数。
     
@@ -364,7 +394,7 @@ def main():
 
         # 複数のホストと期待されるpingの結果とtrace経路のリスト
         list_ping_eval, list_trace_eval = convert_to_list(df_net_test_eval)
-        ping_results, trace_results = asyncio.run(ping_trace_multiple_hosts(
+        ping_results, trace_results, results_dir = asyncio.run(ping_trace_multiple_hosts(
             ping_count = ping_count,
             max_rtt = max_rtt,
             max_packet_loss = max_packet_loss,
@@ -373,10 +403,12 @@ def main():
             selected_kyoten_name = selected_kyoten_name,
             selected_test_type = selected_test_type))
 
-        print(ping_results = f'{ping_results}')
-        print(trace_results = f'{trace_results}')
+        print(f'ping_results = {ping_results}')
+        print(f'trace_results = {trace_results}')
         
-        write_results_to_excel(ping_results, trace_results)
+        # excel_file=f'{results_dir}/{selected_kyoten_name}_{selected_test_type}_判定表.xlsx'
+        excel_file = generate_unique_filename(results_dir, selected_kyoten_name, selected_test_type)
+        write_results_to_excel(ping_results, trace_results, excel_file)
         
     except Exception as e:
         print(e)  # エラーメッセージを表示
