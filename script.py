@@ -8,6 +8,8 @@ from aiofiles import open as aio_open  # 非同期でファイルを開く
 import yaml
 import openpyxl
 from openpyxl.styles import PatternFill
+import platform
+import locale
 
 def load_config(config_path):
     """
@@ -27,6 +29,33 @@ def load_config(config_path):
     max_packet_loss = config.get('max_packet_loss', 20)  # デフォルト値
     
     return ping_count, max_rtt, max_packet_loss
+
+def is_windows():
+    """Windowsかどうかを判定"""
+    return platform.system().lower() == 'windows'
+
+def is_mac():
+    """Macかどうかを判定"""
+    return platform.system().lower() == 'darwin'
+
+def get_os_language():
+    """OSの言語設定を取得し、日本語版か英語版かを判定"""
+    lang, _ = locale.getdefaultlocale()  # ロケール情報を取得
+    
+    if lang == 'ja_JP':
+        return 'Japanese'
+    elif lang.startswith('en'):
+        return 'English'
+    else:
+        return 'Other'
+
+def is_japanese_os():
+    """OSが日本語版かどうかを判定"""
+    return get_os_language() == 'Japanese'
+
+def is_english_os():
+    """OSが英語版かどうかを判定"""
+    return get_os_language() == 'English'
 
 # 非同期で結果をログファイルに保存する関数
 async def save_results(kyoten_name, test_type, index, host, output, results_dir, result_type):
@@ -50,7 +79,88 @@ async def ping(ping_count, host):
     )
     stdout, stderr = await proc.communicate()
     return stdout.decode() if stdout else stderr.decode()
-         
+
+def evaluate_ping_result(packet_loss, avg_rtt, max_rtt, max_packet_loss):
+    """
+    パケットロス率とRTTの結果を判定
+    """
+    if packet_loss <= max_packet_loss and avg_rtt <= max_rtt:
+        print(f"成功 (パケットロス: {packet_loss}%, 平均RTT: {avg_rtt} ms)")
+        return True
+    else:
+        print(f"失敗 (パケットロス: {packet_loss}%, 平均RTT: {avg_rtt} ms)")
+        return False
+
+class UnsupportedLanguageError(Exception):
+    """サポートされていない言語のための例外"""
+    pass
+
+def parse_packet_loss(output, pattern):
+    """
+    パケットロス率の解析
+    Parameters:
+    - output (str): pingの結果出力
+    - pattern (str): パケットロス率の正規表現パターン
+    Returns:
+    - packet_loss (int): パケットロス率、解析失敗時はNone
+    """
+    packet_loss_match = re.search(pattern, output)
+    if packet_loss_match:
+        return float(packet_loss_match.group(1))  # パケットロス率を取得
+    else:
+        print("パケットロス率の解析に失敗しました。")
+        return None
+
+def parse_rtt(output, pattern):
+    """
+    RTTの解析
+    Parameters:
+    - output (str): pingの結果出力
+    - pattern (str): RTTの正規表現パターン
+    Returns:
+    - avg_rtt (int): 平均RTT、解析失敗時はNone
+    """
+    rtt_match = re.search(pattern, output)
+    if rtt_match:
+        return float(rtt_match.group(1))  # 平均RTTを取得
+    else:
+        print("RTTの解析に失敗しました。")
+        return None
+
+# TODO: Windowsでのping判定
+def validate_ping_windows(output, max_rtt, max_packet_loss):
+    if is_japanese_os(): # 日本語版WindowsのパケットロスとRTT解析
+        packet_loss = parse_packet_loss(output, r'(\d+)% の損失')
+        avg_rtt = parse_rtt(output, r'平均 = (\d+)ms')
+        
+    elif is_english_os(): # 英語版WindowsのパケットロスとRTT解析
+        packet_loss = parse_packet_loss(output, r'(\d+)% loss')
+        avg_rtt = parse_rtt(output, r'Average = (\d+)ms')
+
+    else:
+        raise UnsupportedLanguageError("サポートされていない言語のための例外")
+    
+    if packet_loss is None or avg_rtt is None:
+        return False
+     
+    # パケットロスとRTTの判定
+    return evaluate_ping_result(packet_loss, avg_rtt, max_rtt, max_packet_loss)
+
+# TODO: Macでのping判定（言語によってメッセージは変わらない）
+def validate_ping_mac(output, max_rtt, max_packet_loss):
+    packet_loss = parse_packet_loss(output, r'(\d+)\.\d+% packet loss')
+    avg_rtt = parse_rtt(output, r'round-trip min/avg/max/stddev = [\d.]+/([\d.]+)/[\d.]+/[\d.]+ ms')
+    
+    if packet_loss is None or avg_rtt is None:
+        return False
+     
+    # パケットロスとRTTの判定
+    return evaluate_ping_result(packet_loss, avg_rtt, max_rtt, max_packet_loss)
+ 
+class UnsupportedOSError(Exception):
+    """サポートされていないOSのための例外"""
+    pass
+      
 # TODO:pingの出力と期待される結果を比較（Windows版では解析処理を変更する必要あり）
 def validate_ping(max_rtt, max_packet_loss, output, expected_status):    
     if output is None:
@@ -62,30 +172,15 @@ def validate_ping(max_rtt, max_packet_loss, output, expected_status):
             return True
         else:
             return False
-            
-    # TODO: パケットロス率の解析
-    packet_loss = re.search(r'(\d+)% packet loss', output)
-    if packet_loss:
-        loss_percentage = int(packet_loss.group(1))  # パケットロス率を整数として取得
+        
+    # WindowsとMacの解析処理を分岐
+    if is_windows():
+        return validate_ping_windows(output, max_rtt, max_packet_loss)
+    elif is_mac():
+        return validate_ping_mac(output, max_rtt, max_packet_loss)
     else:
-        print("パケットロス率を解析できませんでした")
-        return False
-
-    # TODO: RTT (応答時間) の解析
-    rtt_match = re.search(r'round-trip min/avg/max/stddev = ([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+) ms', output)
-    if rtt_match:
-        avg_rtt = float(rtt_match.group(2))  # 平均RTTを取得
-    else:
-        print("RTTデータを解析できませんでした")
-        return False
-
-    # パケットロス率とRTTの判定
-    if loss_percentage <= max_packet_loss and avg_rtt <= max_rtt:
-        print(f"成功 (パケットロス: {loss_percentage}%, 平均RTT: {avg_rtt} ms)")
-        return True 
-    else:
-        print(f"失敗 (パケットロス: {loss_percentage}%, 平均RTT: {avg_rtt} ms)")
-        return False
+        # サポートされていないOSの場合に例外を投げる
+        raise UnsupportedOSError("サポートされていないOSです。")
 
 # 非同期でホストへpingを送信し、結果を評価する関数
 async def ping_and_validate(ping_count, max_rtt, max_packet_loss, host, expected_status):

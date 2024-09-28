@@ -8,8 +8,9 @@ from unittest import mock
 # テスト対象の関数が記載されているモジュールをインポートします
 from script import save_results, extract_ips, check_route_match, validate_ping, validate_route, ping, ping_multiple_hosts, \
     traceroute, trace_multiple_hosts, convert_to_list, select_kyoten, select_test_type, get_test_type_path, SelectionError, \
-    generate_unique_filename, get_name_by_host
-
+    generate_unique_filename, get_name_by_host, evaluate_ping_result, validate_ping_windows, is_windows, is_mac, UnsupportedOSError, \
+    UnsupportedLanguageError, validate_ping_mac
+    
 @pytest.mark.asyncio
 async def test_save_results_ping(tmpdir):
     # 一時ディレクトリを作成
@@ -89,64 +90,202 @@ async def test_ping_async_custom_ping_count():
     # 'icmp_seq' が ping_count 分含まれることを確認
     assert result.count('icmp_seq') == int(ping_count), f"Ping count mismatch, expected {ping_count}"
 
-@pytest.fixture
-def mock_config_file(tmp_path):
-    config_content = 'max_rtt: 100\nmax_packet_loss: 20\n'
-    config_file = tmp_path / 'config.txt'
-    config_file.write_text(config_content)
-    return config_file
+@pytest.mark.parametrize("packet_loss, avg_rtt, max_rtt, max_packet_loss, expected", [
+    (0, 50, 100, 20, True),    # パケットロスとRTTが閾値以下 -> 成功
+    (15, 90, 100, 20, True),   # パケットロスとRTTが閾値以下 -> 成功
+    (25, 90, 100, 20, False),  # パケットロスが閾値を超えている -> 失敗
+    (15, 120, 100, 20, False), # RTTが閾値を超えている -> 失敗
+    (25, 120, 100, 20, False), # パケットロスとRTT両方が閾値を超えている -> 失敗
+])
+def test_evaluate_ping_result(packet_loss, avg_rtt, max_rtt, max_packet_loss, expected):
+    result = evaluate_ping_result(packet_loss, avg_rtt, max_rtt, max_packet_loss)
+    assert result == expected, f"Test failed for packet_loss={packet_loss}, avg_rtt={avg_rtt}"
 
-def test_validate_ping_success(mock_config_file):
-    output = """64 bytes from 192.168.1.1: icmp_seq=1 ttl=64 time=0.032 ms
-64 bytes from 192.168.1.1: icmp_seq=2 ttl=64 time=0.045 ms
-64 bytes from 192.168.1.1: icmp_seq=3 ttl=64 time=0.034 ms
+# 正常ケース: 日本語OSの出力をモックしてテスト
+def test_validate_ping_windows_japanese_os(monkeypatch):
+    # 日本語版OSでのモック設定
+    monkeypatch.setattr('script.is_japanese_os', lambda: True)
+    monkeypatch.setattr('script.is_english_os', lambda: False)
 
---- 192.168.1.1 ping statistics ---
-3 packets transmitted, 3 received, 0% packet loss, time 2001ms
-round-trip min/avg/max/stddev = 0.032/0.037/0.045/0.001 ms
-"""
-    result = validate_ping(max_rtt=100, max_packet_loss=20, output=output, expected_status='ok')
-    assert result is True
+    # 日本語版Windowsのping結果例
+    output = """
+    パケット: 送信 = 4, 受信 = 4, 損失 = 0 (0% の損失),
+    最小 = 12ms, 最大 = 32ms, 平均 = 24ms
+    """
+    result = validate_ping_windows(output, max_rtt=100, max_packet_loss=20)
+    assert result == True
 
-def test_validate_ping_failure_due_to_rtt(mock_config_file):
-    output = """64 bytes from 192.168.1.1: icmp_seq=1 ttl=64 time=150.032 ms
-64 bytes from 192.168.1.1: icmp_seq=2 ttl=64 time=200.045 ms
+# 正常ケース: 英語OSの出力をモックしてテスト
+def test_validate_ping_windows_english_os(monkeypatch):
+    # 英語版OSでのモック設定
+    monkeypatch.setattr('script.is_japanese_os', lambda: False)
+    monkeypatch.setattr('script.is_english_os', lambda: True)
 
---- 192.168.1.1 ping statistics ---
-2 packets transmitted, 2 received, 0% packet loss, time 2001ms
-round-trip min/avg/max/stddev = 150.032/175.037/200.045/0.001 ms
-"""
-    result = validate_ping(max_rtt=100, max_packet_loss=20, output=output, expected_status='ok')
-    assert result is False
+    # 英語版Windowsのping結果例
+    output = """
+    Packets: Sent = 4, Received = 4, Lost = 0 (0% loss),
+    Minimum = 12ms, Maximum = 32ms, Average = 24ms
+    """
+    result = validate_ping_windows(output, max_rtt=100, max_packet_loss=20)
+    assert result == True
 
-def test_validate_ping_failure_due_to_packet_loss(mock_config_file):
-    output = """64 bytes from 192.168.1.1: icmp_seq=1 ttl=64 time=0.032 ms
-64 bytes from 192.168.1.1: icmp_seq=2 ttl=64 time=0.045 ms
+# 異常ケース: サポートされていない言語での例外テスト
+def test_validate_ping_windows_unsupported_language(monkeypatch):
+    # 日本語でも英語でもないOSのモック設定
+    monkeypatch.setattr('script.is_japanese_os', lambda: False)
+    monkeypatch.setattr('script.is_english_os', lambda: False)
 
---- 192.168.1.1 ping statistics ---
-3 packets transmitted, 1 received, 66% packet loss, time 2001ms
-round-trip min/avg/max/stddev = 0.032/0.037/0.045/0.001 ms
-"""
-    result = validate_ping(max_rtt=100, max_packet_loss=20, output=output, expected_status='ok')
-    assert result is False
+    # サポートされていない言語に対して例外が発生するかをテスト
+    output = "unsupported language ping output"
+    with pytest.raises(UnsupportedLanguageError):
+        validate_ping_windows(output, max_rtt=100, max_packet_loss=20)
 
-def test_validate_ping_ng_case(mock_config_file):
-    output = "Request timeout"
-    result = validate_ping(max_rtt=100, max_packet_loss=20, output=output, expected_status='ng')
-    assert result is True
+# RTTの解析に失敗するケース（日本語）
+def test_validate_ping_windows_japanese_os_rtt_fail(monkeypatch):
+    monkeypatch.setattr('script.is_japanese_os', lambda: True)
+    monkeypatch.setattr('script.is_english_os', lambda: False)
 
-def test_validate_ping_ng_but_ok_case(mock_config_file):
-    output = """64 bytes from 192.168.1.1: icmp_seq=1 ttl=64 time=0.032 ms
-64 bytes from 192.168.1.1: icmp_seq=2 ttl=64 time=0.045 ms
-64 bytes from 192.168.1.1: icmp_seq=3 ttl=64 time=0.034 ms
+    # RTTデータが不正な日本語版Windowsのping結果
+    output = """
+    パケット: 送信 = 4, 受信 = 4, 損失 = 0 (0% の損失),
+    最小 = 12ms, 最大 = 32ms
+    """
+    result = validate_ping_windows(output, max_rtt=100, max_packet_loss=20)
+    assert result == False
 
---- 192.168.1.1 ping statistics ---
-3 packets transmitted, 3 received, 0% packet loss, time 2001ms
-round-trip min/avg/max/stddev = 0.032/0.037/0.045/0.001 ms
-"""
-    result = validate_ping(max_rtt=100, max_packet_loss=20, output=output, expected_status='ng')
-    assert result is False
+# パケットロス解析に失敗するケース（英語）
+def test_validate_ping_windows_english_os_packet_loss_fail(monkeypatch):
+    monkeypatch.setattr('script.is_japanese_os', lambda: False)
+    monkeypatch.setattr('script.is_english_os', lambda: True)
+
+    # パケットロスデータが不正な英語版Windowsのping結果
+    output = """
+    Packets: Sent = 4, Received = 4, Lost = - (loss info missing),
+    Minimum = 12ms, Maximum = 32ms, Average = 24ms
+    """
+    result = validate_ping_windows(output, max_rtt=100, max_packet_loss=20)
+    assert result == False
+
+def test_validate_ping_mac_success():
+    # テストデータ
+    output = "64 bytes from 8.8.8.8: icmp_seq=1 ttl=128 time=30.000 ms\n" \
+             "4 packets transmitted, 4 packets received, 0.0% packet loss\n" \
+             "round-trip min/avg/max/stddev = 29.9/30.0/30.1/0.05 ms"
+    max_rtt = 50
+    max_packet_loss = 1
+
+    # モック関数でparse_packet_lossとparse_rttを設定
+    with patch('script.parse_packet_loss', return_value=0), \
+         patch('script.parse_rtt', return_value=30.0), \
+         patch('script.evaluate_ping_result', return_value=True):
+        
+        # validate_ping_mac関数の実行
+        result = validate_ping_mac(output, max_rtt, max_packet_loss)
+        
+        # 結果がTrueであることを確認
+        assert result is True
+
+def test_validate_ping_mac_failure_packet_loss():
+    # テストデータ
+    output = "64 bytes from 8.8.8.8: icmp_seq=1 ttl=128 time=30.000 ms\n" \
+             "4 packets transmitted, 4 packets received, 10.0% packet loss\n" \
+             "round-trip min/avg/max/stddev = 29.9/30.0/30.1/0.05 ms"
+    max_rtt = 50
+    max_packet_loss = 1
+
+    # モック関数でparse_packet_lossとparse_rttを設定
+    with patch('script.parse_packet_loss', return_value=10), \
+         patch('script.parse_rtt', return_value=30.0), \
+         patch('script.evaluate_ping_result', return_value=False):
+        
+        # validate_ping_mac関数の実行
+        result = validate_ping_mac(output, max_rtt, max_packet_loss)
+        
+        # 結果がFalseであることを確認
+        assert result is False
+
+def test_validate_ping_mac_failure_rtt():
+    # テストデータ
+    output = "64 bytes from 8.8.8.8: icmp_seq=1 ttl=128 time=80.000 ms\n" \
+             "4 packets transmitted, 4 packets received, 0.0% packet loss\n" \
+             "round-trip min/avg/max/stddev = 79.9/80.0/80.1/0.05 ms"
+    max_rtt = 50
+    max_packet_loss = 1
+
+    # モック関数でparse_packet_lossとparse_rttを設定
+    with patch('script.parse_packet_loss', return_value=0), \
+         patch('script.parse_rtt', return_value=80.0), \
+         patch('script.evaluate_ping_result', return_value=False):
+        
+        # validate_ping_mac関数の実行
+        result = validate_ping_mac(output, max_rtt, max_packet_loss)
+        
+        # 結果がFalseであることを確認
+        assert result is False
+
+def test_validate_ping_mac_invalid_output():
+    # テストデータ: 無効な出力（パケットロスやRTT情報がない）
+    output = "invalid output"
+    max_rtt = 50
+    max_packet_loss = 1
+
+    # モック関数でparse_packet_lossとparse_rttを設定
+    with patch('script.parse_packet_loss', return_value=None), \
+         patch('script.parse_rtt', return_value=None):
+        
+        # validate_ping_mac関数の実行
+        result = validate_ping_mac(output, max_rtt, max_packet_loss)
+        
+        # 結果がFalseであることを確認
+        assert result is False
+        
+# モック関数を使用してOSの判定と関数を置き換え
+@pytest.mark.parametrize("max_rtt, max_packet_loss, output, expected_status, os_type, expected", [
+    # 成功ケース: Windows の場合
+    (100, 20, "パケット: 送信 = 4, 受信 = 4, 損失 = 0 (0% の損失), 平均 = 50ms", 'ok', 'windows', True),
     
+    # 失敗ケース: Windows の場合
+    (100, 20, "パケット: 送信 = 4, 受信 = 3, 損失 = 1 (25% の損失), 平均 = 50ms", 'ok', 'windows', False),
+    
+    # 成功ケース: Mac の場合
+    (100, 20, "4 packets transmitted, 4 packets received, 0% packet loss, time 100ms rtt min/avg/max = 10/20/30 ms", 'ok', 'mac', True),
+    
+    # 失敗ケース: Mac の場合
+    (100, 20, "4 packets transmitted, 3 packets received, 25% packet loss, time 100ms rtt min/avg/max = 10/50/70 ms", 'ok', 'mac', False),
+    
+    # expected_status が ng の場合 (Windows)
+    (100, 20, "Request timeout for icmp_seq 1", 'ng', 'windows', True),
+    
+    # expected_status が ng の場合 (Mac)
+    (100, 20, "Request timeout for icmp_seq 1", 'ng', 'mac', True),
+
+    # None の場合 (失敗ケース)
+    (100, 20, None, 'ok', 'windows', False),
+])
+def test_validate_ping(monkeypatch, max_rtt, max_packet_loss, output, expected_status, os_type, expected):
+    # OS による分岐をモックする
+    if os_type == 'windows':
+        monkeypatch.setattr('script.is_windows', lambda: True)
+        monkeypatch.setattr('script.is_mac', lambda: False)
+        monkeypatch.setattr('script.validate_ping_windows', lambda out, rtt, loss: expected)
+    elif os_type == 'mac':
+        monkeypatch.setattr('script.is_windows', lambda: False)
+        monkeypatch.setattr('script.is_mac', lambda: True)
+        monkeypatch.setattr('script.validate_ping_mac', lambda out, rtt, loss: expected)
+
+    # 関数の実行とアサーション
+    result = validate_ping(max_rtt, max_packet_loss, output, expected_status)
+    assert result == expected, f"Test failed for os_type={os_type}, output={output}"
+
+def test_validate_ping_unsupported_os(monkeypatch):
+    # WindowsとMacの両方をFalseにしてサポート外OSをモック
+    monkeypatch.setattr('script.is_windows', lambda: False)
+    monkeypatch.setattr('script.is_mac', lambda: False)
+
+    # UnsupportedOSError が発生するかを確認
+    with pytest.raises(UnsupportedOSError):
+        validate_ping(100, 20, "output", 'ok')
+        
 @pytest.mark.asyncio
 async def test_ping_multiple_hosts():
     # モックする内容
