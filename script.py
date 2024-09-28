@@ -54,6 +54,8 @@ def validate_ping(output, expected_status, config_path='../files/config.yml'):
     Returns:
     - bool: 成功ならTrue, 失敗ならFalse
     """
+    
+    # TODO: 位置を変更。呼び出されるのは1回でよい。
     # 設定ファイルから閾値を読み込む
     config = load_config(config_path)
     max_rtt = config.get('max_rtt', 100)  # デフォルト値
