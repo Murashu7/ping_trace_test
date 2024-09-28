@@ -6,6 +6,8 @@ import os
 import asyncio
 from aiofiles import open as aio_open  # 非同期でファイルを開く
 import yaml
+import openpyxl
+from openpyxl.styles import PatternFill
 
 def load_config(config_path):
     """
@@ -37,7 +39,7 @@ async def save_results(kyoten_name, test_type, index, host, output, results_dir,
         async with aio_open(full_output_path, 'a') as f:
             await f.write(f"{host} への {result_type} 結果 {current_time}\n\n")
             await f.write(f"{output}")
-            await f.write("="*40 + "\n\n")
+            await f.write("\n" + "="*60 + "\n")
 
 async def ping(ping_count, host):
     """pingコマンドを非同期で実行"""
@@ -49,16 +51,19 @@ async def ping(ping_count, host):
     stdout, stderr = await proc.communicate()
     return stdout.decode() if stdout else stderr.decode()
          
-# TODO:pingの出力と期待される結果を比較
+# TODO:pingの出力と期待される結果を比較（Windows版では解析処理を変更する必要あり）
 def validate_ping(max_rtt, max_packet_loss, output, expected_status):    
     if output is None:
         return False
     
+    # TODO: expected_status が ng かつ ping が通った場合は以下の処理へ続く
     if expected_status == 'ng':
         if "Request timeout" in output or "Destination Host Unreachable" in output:
             return True
-
-    # パケットロス率の解析
+        else:
+            return False
+            
+    # TODO: パケットロス率の解析
     packet_loss = re.search(r'(\d+)% packet loss', output)
     if packet_loss:
         loss_percentage = int(packet_loss.group(1))  # パケットロス率を整数として取得
@@ -66,7 +71,7 @@ def validate_ping(max_rtt, max_packet_loss, output, expected_status):
         print("パケットロス率を解析できませんでした")
         return False
 
-    # RTT (応答時間) の解析
+    # TODO: RTT (応答時間) の解析
     rtt_match = re.search(r'round-trip min/avg/max/stddev = ([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+) ms', output)
     if rtt_match:
         avg_rtt = float(rtt_match.group(2))  # 平均RTTを取得
@@ -208,9 +213,9 @@ async def ping_trace_multiple_hosts(ping_count, max_rtt, max_packet_loss, list_p
     # フォルダが存在しなければ作成
     os.makedirs(results_dir, exist_ok=True)
     
-    ping_results = await ping_multiple_hosts(ping_count, max_rtt, max_packet_loss,selected_kyoten_name, selected_test_type, list_ping_eval, results_dir)
+    ping_results = await ping_multiple_hosts(ping_count, max_rtt, max_packet_loss, selected_kyoten_name, selected_test_type, list_ping_eval, results_dir)
     trace_results = await trace_multiple_hosts(selected_kyoten_name, selected_test_type, list_trace_eval, results_dir)
-    return ping_results, trace_results
+    return ping_results, trace_results, results_dir
 
 # 結果を辞書に変換する関数
 def convert_to_list(df):
@@ -322,6 +327,111 @@ def get_test_type_path(selected_kyoten_type, selected_test_type, test_info_path=
     else:
         raise SelectionError("選択された拠点タイプまたは試験タイプが見つかりませんでした。")
 
+def generate_unique_filename(results_dir, selected_kyoten_name, selected_test_type):
+    """
+    ファイル名を生成し、重複があれば連番を付与して一意なファイル名を生成する関数。
+    
+    Parameters:
+    - results_dir (str): 保存するディレクトリパス
+    - selected_kyoten_name (str): 拠点名
+    - selected_test_type (str): 試験タイプ
+    
+    Returns:
+    - excel_file (str): 一意なファイル名
+    """
+    # 基本となるファイル名
+    base_filename = f'{selected_kyoten_name}_{selected_test_type}_判定表'
+    extension = '.xlsx'
+    
+    # 最初のファイル名
+    excel_file = os.path.join(results_dir, f'{base_filename}{extension}')
+    
+    # ファイルが存在する場合、インクリメントして一意な名前を生成
+    counter = 1
+    while os.path.exists(excel_file):
+        excel_file = os.path.join(results_dir, f'{base_filename}({counter}){extension}')
+        counter += 1
+    
+    return excel_file
+
+# hostをキーにしてnameを取得する関数
+def get_name_by_host(df, host):
+    result = df[df['dest'] == host]['name']
+    if not result.empty:
+        return result.values[0]  # 一致するnameを返す
+    else:
+        return None  # 一致するhostが見つからない場合
+
+# TODO: 出力先は各拠点のテストフォルダ結果内へ保存する
+def write_results_to_excel(ping_results, trace_results, excel_file, df_test_eval):
+    """
+    pingとtraceの結果をExcelに書き出す関数。
+    
+    Parameters:
+    - ping_results (list of dict): pingの結果 [{'host_a': True}, ...]
+    - trace_results (list of dict): traceの結果 [{'host_a': False}, ...]
+    - excel_file (str): 出力するExcelファイル名
+    """
+    # Excelに書き込むためのリストを作成
+    data = []
+    for i, (ping, trace) in enumerate(zip(ping_results, trace_results), start=1):
+        host = list(ping.keys())[0]  # ホスト名取得
+        # TODO: hostでdfを検索し該当するnameを取得する
+        name = get_name_by_host(df_test_eval, host)
+        print(f"name = {name}")
+        ping_result = '○' if list(ping.values())[0] else '×'
+        trace_result = '○' if list(trace.values())[0] else '×'
+        data.append([i, name, host, ping_result, trace_result])
+
+    # データをDataFrameに変換
+    df = pd.DataFrame(data, columns=['num', 'name', 'dest', 'ping_result', 'trace_result'])
+
+    # Excelファイルに書き出し
+    df.to_excel(excel_file, index=False)
+
+    print(f"Excelファイル '{excel_file}' に結果が書き込まれました。")
+    
+    return excel_file
+
+def format_excel_file(excel_file):
+    """
+    Excelファイルのセルの幅を自動調整し、○と×のセルの色を変更する。
+
+    Parameters:
+    - excel_file (str): 処理するExcelファイルのパス
+    """
+    # Excelファイルを読み込む
+    wb = openpyxl.load_workbook(excel_file)
+    ws = wb.active  # 最初のシートを取得
+
+    # セルの幅を自動調整
+    for column in ws.columns:
+        max_length = 0
+        column_letter = openpyxl.utils.get_column_letter(column[0].column)  # 列のアルファベット取得
+        for cell in column:
+            try:
+                if len(str(cell.value)) > max_length:
+                    max_length = len(str(cell.value))
+            except:
+                pass
+        adjusted_width = (max_length + 2)  # セルの幅に少し余裕を持たせる
+        ws.column_dimensions[column_letter].width = adjusted_width
+
+    # ○のセルは緑、×のセルは赤に設定
+    green_fill = PatternFill(start_color="00FF00", end_color="00FF00", fill_type="solid")  # 緑
+    red_fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")      # 赤
+
+    for row in ws.iter_rows():
+        for cell in row:
+            if cell.value == "○":
+                cell.fill = green_fill
+            elif cell.value == "×":
+                cell.fill = red_fill
+
+    # Excelファイルを保存
+    wb.save(excel_file)
+    print(f"'{excel_file}' のフォーマットが完了しました。")
+       
 # テスト実行
 def main():
     try:
@@ -334,11 +444,11 @@ def main():
         selected_test_type = select_test_type(selected_kyoten_type)
         
         # pandasで評価用CSVを読み込む
-        df_net_test_eval = pd.read_csv(get_test_type_path(selected_kyoten_type, selected_test_type))
+        df_test_eval = pd.read_csv(get_test_type_path(selected_kyoten_type, selected_test_type))
 
         # 複数のホストと期待されるpingの結果とtrace経路のリスト
-        list_ping_eval, list_trace_eval = convert_to_list(df_net_test_eval)
-        ping_results, trace_results = asyncio.run(ping_trace_multiple_hosts(
+        list_ping_eval, list_trace_eval = convert_to_list(df_test_eval)
+        ping_results, trace_results, results_dir = asyncio.run(ping_trace_multiple_hosts(
             ping_count = ping_count,
             max_rtt = max_rtt,
             max_packet_loss = max_packet_loss,
@@ -347,7 +457,12 @@ def main():
             selected_kyoten_name = selected_kyoten_name,
             selected_test_type = selected_test_type))
 
-        print(ping_results, trace_results)
+        print(f'ping_results = {ping_results}')
+        print(f'trace_results = {trace_results}')
+        
+        excel_file = generate_unique_filename(results_dir, selected_kyoten_name, selected_test_type)
+        writed_excel_file = write_results_to_excel(ping_results, trace_results, excel_file, df_test_eval)
+        format_excel_file(writed_excel_file)
         
     except Exception as e:
         print(e)  # エラーメッセージを表示
