@@ -409,9 +409,9 @@ def mock_test_info_csv(tmpdir):
 def test_get_test_type_path_valid(mock_test_info_csv):
     """有効な選択肢に対して正しいファイルパスを返すことをテスト"""
     result_1 = get_test_type_path("大規模", "正常性試験", mock_test_info_csv)
-    assert result_1 == "../files/test_type_a.csv"
+    assert result_1 == "../settings/test_type_a.csv"
     result_2 = get_test_type_path("中規模", "正常性試験", mock_test_info_csv)
-    assert result_2 == "../files/test_type_c.csv"
+    assert result_2 == "../settings/test_type_c.csv"
     
 def test_get_test_type_path_invalid_type(mock_test_info_csv):
     """無効な拠点タイプに対して例外が発生することをテスト"""
@@ -481,7 +481,7 @@ def test_generate_unique_filename_third_call(mock_exists):
 @pytest.fixture
 def df():
     data = {
-        'host': ['8.8.8.8', '8.8.4.4', '100.100.100.100'],
+        'dest': ['8.8.8.8', '8.8.4.4', '100.100.100.100'],
         'name': ['google_dns_1', 'google_dns_2', 'yahoo'],
         'data1': ['data_1', 'data_2', 'data_3'],
         'data2': ['data_1', 'data_2', 'data_3'],
