@@ -67,17 +67,25 @@ async def test_save_results_traceroute(tmpdir):
         assert "="*40 in content
 
 @pytest.mark.asyncio
-async def test_ping():
-    # ping コマンドの出力をモック
-    mock_stdout = AsyncMock()
-    mock_stdout.communicate.return_value = (b"5 packets transmitted, 5 packets received, 0.0% packet loss", b"")
+async def test_ping_async_valid_host():
+    host = 'google.com'  # 有効なホスト
+    result = await ping(ping_count='2', host=host)
+    assert 'bytes from' in result or 'icmp_seq' in result, "Ping failed for valid host"
 
-    # asyncio.create_subprocess_exec をモック
-    with patch('asyncio.create_subprocess_exec', return_value=mock_stdout):
-        result = await ping('8.8.8.8')
-        
-        assert "5 packets transmitted" in result
-        assert "5 packets received" in result
+@pytest.mark.asyncio
+async def test_ping_async_invalid_host():
+    host = 'invalid-host'  # 存在しないホスト
+    result = await ping(ping_count='2', host=host)
+    assert 'ping: cannot resolve' in result or 'unknown host' in result, "Ping should fail for invalid host"
+
+@pytest.mark.asyncio
+async def test_ping_async_custom_ping_count():
+    host = 'google.com'
+    ping_count = '3'
+    result = await ping(ping_count=ping_count, host=host)
+    
+    # 'icmp_seq' が ping_count 分含まれることを確認
+    assert result.count('icmp_seq') == int(ping_count), f"Ping count mismatch, expected {ping_count}"
 
 @pytest.fixture
 def mock_config_file(tmp_path):
@@ -95,7 +103,7 @@ def test_validate_ping_success(mock_config_file):
 3 packets transmitted, 3 received, 0% packet loss, time 2001ms
 round-trip min/avg/max/stddev = 0.032/0.037/0.045/0.001 ms
 """
-    result = validate_ping(output, expected_status='ok')
+    result = validate_ping(max_rtt=100, max_packet_loss=20, output=output, expected_status='ok')
     assert result is True
 
 def test_validate_ping_failure_due_to_rtt(mock_config_file):
@@ -106,7 +114,7 @@ def test_validate_ping_failure_due_to_rtt(mock_config_file):
 2 packets transmitted, 2 received, 0% packet loss, time 2001ms
 round-trip min/avg/max/stddev = 150.032/175.037/200.045/0.001 ms
 """
-    result = validate_ping(output, expected_status='ok')
+    result = validate_ping(max_rtt=100, max_packet_loss=20, output=output, expected_status='ok')
     assert result is False
 
 def test_validate_ping_failure_due_to_packet_loss(mock_config_file):
@@ -117,12 +125,12 @@ def test_validate_ping_failure_due_to_packet_loss(mock_config_file):
 3 packets transmitted, 1 received, 66% packet loss, time 2001ms
 round-trip min/avg/max/stddev = 0.032/0.037/0.045/0.001 ms
 """
-    result = validate_ping(output, expected_status='ok')
+    result = validate_ping(max_rtt=100, max_packet_loss=20, output=output, expected_status='ok')
     assert result is False
 
 def test_validate_ping_ng_case(mock_config_file):
     output = "Request timeout"
-    result = validate_ping(output, expected_status='ng')
+    result = validate_ping(max_rtt=100, max_packet_loss=20, output=output, expected_status='ng')
     assert result is True
 
 @pytest.mark.asyncio
@@ -139,8 +147,15 @@ async def test_ping_multiple_hosts():
             {"8.8.8.8": "ok"},
             {"1.1.1.1": "ng"}
         ]
-        
-        results = await ping_multiple_hosts("拠点A", "テスト", list_ping_eval, "/dummy_dir")
+    
+        results = await ping_multiple_hosts(
+            ping_count=5,
+            max_rtt=100,
+            max_packet_loss=20,
+            kyoten_name="拠点A",
+            test_type="テスト",
+            list_ping_eval=list_ping_eval,
+            results_dir="/dummy_dir")
         
         # 結果が正しいか確認
         assert results == [{"8.8.8.8": True}, {"1.1.1.1": True}]
