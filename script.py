@@ -260,7 +260,7 @@ def select_kyoten(df):
     print(f"選択された拠点: {selected_kyoten_name}({selected_kyoten_type})")
     return selected_kyoten_name, selected_kyoten_type
 
-def select_test_type(selected_kyoten_type, csv_file='../files/test_info.csv'):
+def select_test_type(selected_kyoten_type, csv_file='../settings/test_info.csv'):
     # CSVファイルを読み込み
     try:
         df = pd.read_csv(csv_file)
@@ -301,14 +301,14 @@ class SelectionError(Exception):
     """選択された拠点タイプまたは試験タイプが無効な場合に投げられる例外."""
     pass
 
-def get_test_type_path(selected_kyoten_type, selected_test_type, test_info_path='../files/test_info.csv'):
+def get_test_type_path(selected_kyoten_type, selected_test_type, test_info_path='../settings/test_info.csv'):
     """
     test_info.csvを読み込み、選択された拠点タイプと試験タイプに対応するCSVファイルのパスを取得する関数。
     
     Parameters:
     - selected_kyoten_type (str): 選択された拠点タイプ（例: "大規模", "中規模", "小規模"）
     - selected_test_type (str): 選択された試験タイプ
-    - test_info_path (str): test_info.csvのパス（デフォルト: '../files/test_info.csv'）
+    - test_info_path (str): test_info.csvのパス（デフォルト: '../settings/test_info.csv'）
     
     Returns:
     - csv_path (str): 該当するテスト結果ファイルのパス
@@ -323,7 +323,7 @@ def get_test_type_path(selected_kyoten_type, selected_test_type, test_info_path=
     ]
     
     if not matching_row.empty:
-        return f"../files/{matching_row['file_name'].values[0]}"
+        return f"../settings/{matching_row['file_name'].values[0]}"
     else:
         raise SelectionError("選択された拠点タイプまたは試験タイプが見つかりませんでした。")
 
@@ -436,10 +436,10 @@ def format_excel_file(excel_file):
 def main():
     try:
         # configファイルから設定値の読み込み
-        ping_count, max_rtt, max_packet_loss = load_config(config_path='../files/config.yml')
+        ping_count, max_rtt, max_packet_loss = load_config(config_path='../settings/setting.yml')
 
         # 拠点リストのファイルの読み込み
-        df_kyoten = pd.read_csv('../files/kyoten_list.csv')
+        df_kyoten = pd.read_csv('../settings/kyoten_list.csv')
         selected_kyoten_name, selected_kyoten_type = select_kyoten(df_kyoten)
         selected_test_type = select_test_type(selected_kyoten_type)
         
