@@ -7,7 +7,7 @@ import asyncio
 from aiofiles import open as aio_open  # 非同期でファイルを開く
 import yaml
 
-def load_config(config_path='config.yaml'):
+def load_config(config_path):
     """
     設定ファイルを読み込む関数
     
@@ -19,7 +19,12 @@ def load_config(config_path='config.yaml'):
     """
     with open(config_path, 'r') as file:
         config = yaml.safe_load(file)
-    return config
+    
+    ping_count = config.get('ping_count', 5) # デフォルト値
+    max_rtt = config.get('max_rtt', 100)  # デフォルト値
+    max_packet_loss = config.get('max_packet_loss', 20)  # デフォルト値
+    
+    return ping_count, max_rtt, max_packet_loss
 
 # 非同期で結果をログファイルに保存する関数
 async def save_results(kyoten_name, test_type, index, host, output, results_dir, result_type):
@@ -34,33 +39,18 @@ async def save_results(kyoten_name, test_type, index, host, output, results_dir,
             await f.write(f"{output}")
             await f.write("="*40 + "\n\n")
 
-async def ping(host):
+async def ping(ping_count, host):
     """pingコマンドを非同期で実行"""
     proc = await asyncio.create_subprocess_exec(
-        'ping', '-c', '5', host, 
+        'ping', '-c', str(ping_count), host, 
         stdout=subprocess.PIPE, 
         stderr=subprocess.PIPE
     )
-    stdout, _ = await proc.communicate()
-    return stdout.decode()
+    stdout, stderr = await proc.communicate()
+    return stdout.decode() if stdout else stderr.decode()
          
-# TODO:pingの成功判定については仮決め
-def validate_ping(output, expected_status, config_path='../files/config.yml'):
-    """
-    pingの出力と期待される結果を比較
-    output: pingの出力
-    expected_status: pingの結果がOKかNGか判定
-    
-    Returns:
-    - bool: 成功ならTrue, 失敗ならFalse
-    """
-    
-    # TODO: 位置を変更。呼び出されるのは1回でよい。
-    # 設定ファイルから閾値を読み込む
-    config = load_config(config_path)
-    max_rtt = config.get('max_rtt', 100)  # デフォルト値
-    max_packet_loss = config.get('max_packet_loss', 20)  # デフォルト値
-    
+# TODO:pingの出力と期待される結果を比較
+def validate_ping(max_rtt, max_packet_loss, output, expected_status):    
     if output is None:
         return False
     
@@ -93,14 +83,14 @@ def validate_ping(output, expected_status, config_path='../files/config.yml'):
         return False
 
 # 非同期でホストへpingを送信し、結果を評価する関数
-async def ping_and_validate(host, expected_status):
+async def ping_and_validate(ping_count, max_rtt, max_packet_loss, host, expected_status):
     """ホストにpingを送信して、結果を評価"""
     print(f"{host} へのpingを確認中...")
-    ping_output = await ping(host)  # ping関数は非同期で実行
+    ping_output = await ping(ping_count, host)  # ping関数は非同期で実行
     print(ping_output)
 
     # pingの結果をバリデート
-    success = validate_ping(ping_output, expected_status)
+    success = validate_ping(max_rtt, max_packet_loss, ping_output, expected_status)
     
     if success:
         print(f"{host} へのpingの結果は成功しました\n")
@@ -110,10 +100,10 @@ async def ping_and_validate(host, expected_status):
     # pingの結果と評価結果を返す
     return ping_output, success
 
-async def process_ping(kyoten_name, test_type, index, host, expected_status, results_dir):
+async def process_ping(ping_count, max_rtt, max_packet_loss, kyoten_name, test_type, index, host, expected_status, results_dir):
     """個別のホストのpingを処理"""
     # pingを送信して結果を評価
-    ping_output, success = await ping_and_validate(host, expected_status)
+    ping_output, success = await ping_and_validate(ping_count, max_rtt, max_packet_loss, host, expected_status)
 
     # 結果をログファイルに保存
     await save_results(kyoten_name, test_type, index, host, ping_output, results_dir, 'ping')
@@ -121,12 +111,12 @@ async def process_ping(kyoten_name, test_type, index, host, expected_status, res
     # 成功/失敗の結果を返す
     return {host: success}
 
-async def ping_multiple_hosts(kyoten_name, test_type, list_ping_eval, results_dir):
+async def ping_multiple_hosts(ping_count, max_rtt, max_packet_loss, kyoten_name, test_type, list_ping_eval, results_dir):
     tasks = []
     for index, dict_ping_eval in enumerate(list_ping_eval, start=1):
         host = list(dict_ping_eval.keys())[0]
         expected_status = dict_ping_eval[host]
-        task = asyncio.create_task(process_ping(kyoten_name, test_type, index, host, expected_status, results_dir))
+        task = asyncio.create_task(process_ping(ping_count, max_rtt, max_packet_loss,kyoten_name, test_type, index, host, expected_status, results_dir))
         tasks.append(task)
     return await asyncio.gather(*tasks)
 
@@ -208,7 +198,7 @@ async def trace_multiple_hosts(kyoten_name, test_type, list_trace_eval, results_
     
     return await asyncio.gather(*tasks)
 
-async def ping_trace_multiple_hosts(list_ping_eval, list_trace_eval, selected_kyoten_name, selected_test_type):
+async def ping_trace_multiple_hosts(ping_count, max_rtt, max_packet_loss, list_ping_eval, list_trace_eval, selected_kyoten_name, selected_test_type):
     ping_results = {}
     trace_results = {}
     
@@ -218,7 +208,7 @@ async def ping_trace_multiple_hosts(list_ping_eval, list_trace_eval, selected_ky
     # フォルダが存在しなければ作成
     os.makedirs(results_dir, exist_ok=True)
     
-    ping_results = await ping_multiple_hosts(selected_kyoten_name, selected_test_type, list_ping_eval, results_dir)
+    ping_results = await ping_multiple_hosts(ping_count, max_rtt, max_packet_loss,selected_kyoten_name, selected_test_type, list_ping_eval, results_dir)
     trace_results = await trace_multiple_hosts(selected_kyoten_name, selected_test_type, list_trace_eval, results_dir)
     return ping_results, trace_results
 
@@ -335,9 +325,11 @@ def get_test_type_path(selected_kyoten_type, selected_test_type, test_info_path=
 # テスト実行
 def main():
     try:
-        # CSVファイルの読み込み
-        csv_kyoten_list = '../files/kyoten_list.csv' 
-        df_kyoten = pd.read_csv(csv_kyoten_list)
+        # configファイルから設定値の読み込み
+        ping_count, max_rtt, max_packet_loss = load_config(config_path='../files/config.yml')
+
+        # 拠点リストのファイルの読み込み
+        df_kyoten = pd.read_csv('../files/kyoten_list.csv')
         selected_kyoten_name, selected_kyoten_type = select_kyoten(df_kyoten)
         selected_test_type = select_test_type(selected_kyoten_type)
         
@@ -346,7 +338,14 @@ def main():
 
         # 複数のホストと期待されるpingの結果とtrace経路のリスト
         list_ping_eval, list_trace_eval = convert_to_list(df_net_test_eval)
-        ping_results, trace_results = asyncio.run(ping_trace_multiple_hosts(list_ping_eval, list_trace_eval, selected_kyoten_name, selected_test_type))
+        ping_results, trace_results = asyncio.run(ping_trace_multiple_hosts(
+            ping_count = ping_count,
+            max_rtt = max_rtt,
+            max_packet_loss = max_packet_loss,
+            list_ping_eval = list_ping_eval,
+            list_trace_eval = list_trace_eval,
+            selected_kyoten_name = selected_kyoten_name,
+            selected_test_type = selected_test_type))
 
         print(ping_results, trace_results)
         
