@@ -6,6 +6,8 @@ import os
 import asyncio
 from aiofiles import open as aio_open  # 非同期でファイルを開く
 import yaml
+import openpyxl
+from openpyxl.styles import PatternFill
 
 def load_config(config_path):
     """
@@ -211,7 +213,7 @@ async def ping_trace_multiple_hosts(ping_count, max_rtt, max_packet_loss, list_p
     # フォルダが存在しなければ作成
     os.makedirs(results_dir, exist_ok=True)
     
-    ping_results = await ping_multiple_hosts(ping_count, max_rtt, max_packet_loss,selected_kyoten_name, selected_test_type, list_ping_eval, results_dir)
+    ping_results = await ping_multiple_hosts(ping_count, max_rtt, max_packet_loss, selected_kyoten_name, selected_test_type, list_ping_eval, results_dir)
     trace_results = await trace_multiple_hosts(selected_kyoten_name, selected_test_type, list_trace_eval, results_dir)
     return ping_results, trace_results, results_dir
 
@@ -352,8 +354,16 @@ def generate_unique_filename(results_dir, selected_kyoten_name, selected_test_ty
     
     return excel_file
 
+# hostをキーにしてnameを取得する関数
+def get_name_by_host(df, host):
+    result = df[df['dest'] == host]['name']
+    if not result.empty:
+        return result.values[0]  # 一致するnameを返す
+    else:
+        return None  # 一致するhostが見つからない場合
+
 # TODO: 出力先は各拠点のテストフォルダ結果内へ保存する
-def write_results_to_excel(ping_results, trace_results, excel_file):
+def write_results_to_excel(ping_results, trace_results, excel_file, df_test_eval):
     """
     pingとtraceの結果をExcelに書き出す関数。
     
@@ -366,18 +376,62 @@ def write_results_to_excel(ping_results, trace_results, excel_file):
     data = []
     for i, (ping, trace) in enumerate(zip(ping_results, trace_results), start=1):
         host = list(ping.keys())[0]  # ホスト名取得
+        # TODO: hostでdfを検索し該当するnameを取得する
+        name = get_name_by_host(df_test_eval, host)
+        print(f"name = {name}")
         ping_result = '○' if list(ping.values())[0] else '×'
         trace_result = '○' if list(trace.values())[0] else '×'
-        data.append([i, host, ping_result, trace_result])
+        data.append([i, name, host, ping_result, trace_result])
 
     # データをDataFrameに変換
-    df = pd.DataFrame(data, columns=['num', 'host', 'ping_result', 'trace_result'])
+    df = pd.DataFrame(data, columns=['num', 'name', 'dest', 'ping_result', 'trace_result'])
 
     # Excelファイルに書き出し
     df.to_excel(excel_file, index=False)
 
     print(f"Excelファイル '{excel_file}' に結果が書き込まれました。")
     
+    return excel_file
+
+def format_excel_file(excel_file):
+    """
+    Excelファイルのセルの幅を自動調整し、○と×のセルの色を変更する。
+
+    Parameters:
+    - excel_file (str): 処理するExcelファイルのパス
+    """
+    # Excelファイルを読み込む
+    wb = openpyxl.load_workbook(excel_file)
+    ws = wb.active  # 最初のシートを取得
+
+    # セルの幅を自動調整
+    for column in ws.columns:
+        max_length = 0
+        column_letter = openpyxl.utils.get_column_letter(column[0].column)  # 列のアルファベット取得
+        for cell in column:
+            try:
+                if len(str(cell.value)) > max_length:
+                    max_length = len(str(cell.value))
+            except:
+                pass
+        adjusted_width = (max_length + 2)  # セルの幅に少し余裕を持たせる
+        ws.column_dimensions[column_letter].width = adjusted_width
+
+    # ○のセルは緑、×のセルは赤に設定
+    green_fill = PatternFill(start_color="00FF00", end_color="00FF00", fill_type="solid")  # 緑
+    red_fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")      # 赤
+
+    for row in ws.iter_rows():
+        for cell in row:
+            if cell.value == "○":
+                cell.fill = green_fill
+            elif cell.value == "×":
+                cell.fill = red_fill
+
+    # Excelファイルを保存
+    wb.save(excel_file)
+    print(f"'{excel_file}' のフォーマットが完了しました。")
+       
 # テスト実行
 def main():
     try:
@@ -390,10 +444,10 @@ def main():
         selected_test_type = select_test_type(selected_kyoten_type)
         
         # pandasで評価用CSVを読み込む
-        df_net_test_eval = pd.read_csv(get_test_type_path(selected_kyoten_type, selected_test_type))
+        df_test_eval = pd.read_csv(get_test_type_path(selected_kyoten_type, selected_test_type))
 
         # 複数のホストと期待されるpingの結果とtrace経路のリスト
-        list_ping_eval, list_trace_eval = convert_to_list(df_net_test_eval)
+        list_ping_eval, list_trace_eval = convert_to_list(df_test_eval)
         ping_results, trace_results, results_dir = asyncio.run(ping_trace_multiple_hosts(
             ping_count = ping_count,
             max_rtt = max_rtt,
@@ -406,9 +460,9 @@ def main():
         print(f'ping_results = {ping_results}')
         print(f'trace_results = {trace_results}')
         
-        # excel_file=f'{results_dir}/{selected_kyoten_name}_{selected_test_type}_判定表.xlsx'
         excel_file = generate_unique_filename(results_dir, selected_kyoten_name, selected_test_type)
-        write_results_to_excel(ping_results, trace_results, excel_file)
+        writed_excel_file = write_results_to_excel(ping_results, trace_results, excel_file, df_test_eval)
+        format_excel_file(writed_excel_file)
         
     except Exception as e:
         print(e)  # エラーメッセージを表示

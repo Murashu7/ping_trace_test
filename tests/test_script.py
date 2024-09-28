@@ -8,7 +8,7 @@ from unittest import mock
 # テスト対象の関数が記載されているモジュールをインポートします
 from script import save_results, extract_ips, check_route_match, validate_ping, validate_route, ping, ping_multiple_hosts, \
     traceroute, trace_multiple_hosts, convert_to_list, select_kyoten, select_test_type, get_test_type_path, SelectionError, \
-    generate_unique_filename
+    generate_unique_filename, get_name_by_host
 
 @pytest.mark.asyncio
 async def test_save_results_ping(tmpdir):
@@ -477,3 +477,31 @@ def test_generate_unique_filename_third_call(mock_exists):
     generated_filename = generate_unique_filename(results_dir, selected_kyoten_name, selected_test_type)
     
     assert generated_filename == expected_filename
+    
+@pytest.fixture
+def df():
+    data = {
+        'host': ['8.8.8.8', '8.8.4.4', '100.100.100.100'],
+        'name': ['google_dns_1', 'google_dns_2', 'yahoo'],
+        'data1': ['data_1', 'data_2', 'data_3'],
+        'data2': ['data_1', 'data_2', 'data_3'],
+        'data3': ['data_1', 'data_2', 'data_3'],
+    }
+    return pd.DataFrame(data)
+
+# 正常なホスト名でのテストケース
+def test_get_name_by_host_valid(df):
+    assert get_name_by_host(df, '8.8.8.8') == 'google_dns_1'
+    assert get_name_by_host(df, '100.100.100.100') == 'yahoo'
+
+# 存在しないホスト名でのテストケース
+def test_get_name_by_host_invalid(df):
+    assert get_name_by_host(df, '1.1.1.1') is None
+
+# 空のホスト名でのテストケース
+def test_get_name_by_host_empty(df):
+    assert get_name_by_host(df, '') is None
+
+# Noneホスト名でのテストケース
+def test_get_name_by_host_none(df):
+    assert get_name_by_host(df, None) is None
