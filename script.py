@@ -30,33 +30,6 @@ def load_config(config_path):
     
     return ping_count, max_rtt, max_packet_loss
 
-def is_windows():
-    """Windowsかどうかを判定"""
-    return platform.system().lower() == 'windows'
-
-def is_mac():
-    """Macかどうかを判定"""
-    return platform.system().lower() == 'darwin'
-
-def get_os_language():
-    """OSの言語設定を取得し、日本語版か英語版かを判定"""
-    lang, _ = locale.getdefaultlocale()  # ロケール情報を取得
-    
-    if lang == 'ja_JP':
-        return 'Japanese'
-    elif lang.startswith('en'):
-        return 'English'
-    else:
-        return 'Other'
-
-def is_japanese_os():
-    """OSが日本語版かどうかを判定"""
-    return get_os_language() == 'Japanese'
-
-def is_english_os():
-    """OSが英語版かどうかを判定"""
-    return get_os_language() == 'English'
-
 # 非同期で結果をログファイルに保存する関数
 async def save_results(kyoten_name, test_type, index, host, output, results_dir, result_type):
     """pingまたはtracerouteの結果をログファイルに保存"""
@@ -70,10 +43,10 @@ async def save_results(kyoten_name, test_type, index, host, output, results_dir,
             await f.write(f"{output}")
             await f.write("\n" + "="*60 + "\n")
 
-async def ping(ping_count, host):
+async def ping(count_opt, ping_count, host):
     """pingコマンドを非同期で実行"""
     proc = await asyncio.create_subprocess_exec(
-        'ping', '-c', str(ping_count), host, 
+        'ping', count_opt, str(ping_count), host, 
         stdout=subprocess.PIPE, 
         stderr=subprocess.PIPE
     )
@@ -90,10 +63,6 @@ def evaluate_ping_result(packet_loss, avg_rtt, max_rtt, max_packet_loss):
     else:
         print(f"失敗 (パケットロス: {packet_loss}%, 平均RTT: {avg_rtt} ms)")
         return False
-
-class UnsupportedLanguageError(Exception):
-    """サポートされていない言語のための例外"""
-    pass
 
 def parse_packet_loss(output, pattern):
     """
@@ -128,17 +97,14 @@ def parse_rtt(output, pattern):
         return None
 
 # TODO: Windowsでのping判定
-def validate_ping_windows(output, max_rtt, max_packet_loss):
-    if is_japanese_os(): # 日本語版WindowsのパケットロスとRTT解析
+def validate_ping_windows(is_ja, output, max_rtt, max_packet_loss):
+    if is_ja: # 日本語版WindowsのパケットロスとRTT解析
         packet_loss = parse_packet_loss(output, r'(\d+)% の損失')
         avg_rtt = parse_rtt(output, r'平均 = (\d+)ms')
         
-    elif is_english_os(): # 英語版WindowsのパケットロスとRTT解析
+    else: # 英語版WindowsのパケットロスとRTT解析
         packet_loss = parse_packet_loss(output, r'(\d+)% loss')
         avg_rtt = parse_rtt(output, r'Average = (\d+)ms')
-
-    else:
-        raise UnsupportedLanguageError("サポートされていない言語のための例外")
     
     if packet_loss is None or avg_rtt is None:
         return False
@@ -146,7 +112,7 @@ def validate_ping_windows(output, max_rtt, max_packet_loss):
     # パケットロスとRTTの判定
     return evaluate_ping_result(packet_loss, avg_rtt, max_rtt, max_packet_loss)
 
-# TODO: Macでのping判定（言語によってメッセージは変わらない）
+# Macでのping判定（言語によってメッセージは変わらない）
 def validate_ping_mac(output, max_rtt, max_packet_loss):
     packet_loss = parse_packet_loss(output, r'(\d+)\.\d+% packet loss')
     avg_rtt = parse_rtt(output, r'round-trip min/avg/max/stddev = [\d.]+/([\d.]+)/[\d.]+/[\d.]+ ms')
@@ -156,13 +122,9 @@ def validate_ping_mac(output, max_rtt, max_packet_loss):
      
     # パケットロスとRTTの判定
     return evaluate_ping_result(packet_loss, avg_rtt, max_rtt, max_packet_loss)
- 
-class UnsupportedOSError(Exception):
-    """サポートされていないOSのための例外"""
-    pass
       
 # TODO:pingの出力と期待される結果を比較（Windows版では解析処理を変更する必要あり）
-def validate_ping(max_rtt, max_packet_loss, output, expected_status):    
+def validate_ping(is_win, is_ja, max_rtt, max_packet_loss, output, expected_status):    
     if output is None:
         return False
     
@@ -174,36 +136,35 @@ def validate_ping(max_rtt, max_packet_loss, output, expected_status):
             return False
         
     # WindowsとMacの解析処理を分岐
-    if is_windows():
-        return validate_ping_windows(output, max_rtt, max_packet_loss)
-    elif is_mac():
-        return validate_ping_mac(output, max_rtt, max_packet_loss)
+    if is_win:
+        return validate_ping_windows(is_ja, output, max_rtt, max_packet_loss)
     else:
-        # サポートされていないOSの場合に例外を投げる
-        raise UnsupportedOSError("サポートされていないOSです。")
+        return validate_ping_mac(output, max_rtt, max_packet_loss)
 
 # 非同期でホストへpingを送信し、結果を評価する関数
-async def ping_and_validate(ping_count, max_rtt, max_packet_loss, host, expected_status):
+async def ping_and_validate(is_win, is_ja, ping_count, max_rtt, max_packet_loss, host, expected_status):
+    count_opt = '-n' if is_win else '-c'
+        
     """ホストにpingを送信して、結果を評価"""
     print(f"{host} へのpingを確認中...")
-    ping_output = await ping(ping_count, host)  # ping関数は非同期で実行
+    ping_output = await ping(count_opt, ping_count, host)  # ping関数は非同期で実行
     print(ping_output)
 
     # pingの結果をバリデート
-    success = validate_ping(max_rtt, max_packet_loss, ping_output, expected_status)
+    success = validate_ping(is_win, is_ja, max_rtt, max_packet_loss, ping_output, expected_status)
     
     if success:
-        print(f"{host} へのpingの結果は成功しました\n")
+        print(f"{host} へのpingの判定は成功しました\n")
     else:
-        print(f"{host} へのpingの結果は失敗しました\n")
+        print(f"{host} へのpingの判定は失敗しました\n")
     
     # pingの結果と評価結果を返す
     return ping_output, success
 
-async def process_ping(ping_count, max_rtt, max_packet_loss, kyoten_name, test_type, index, host, expected_status, results_dir):
+async def process_ping(is_win, is_ja, ping_count, max_rtt, max_packet_loss, kyoten_name, test_type, index, host, expected_status, results_dir):
     """個別のホストのpingを処理"""
     # pingを送信して結果を評価
-    ping_output, success = await ping_and_validate(ping_count, max_rtt, max_packet_loss, host, expected_status)
+    ping_output, success = await ping_and_validate(is_win, is_ja,ping_count, max_rtt, max_packet_loss, host, expected_status)
 
     # 結果をログファイルに保存
     await save_results(kyoten_name, test_type, index, host, ping_output, results_dir, 'ping')
@@ -211,12 +172,12 @@ async def process_ping(ping_count, max_rtt, max_packet_loss, kyoten_name, test_t
     # 成功/失敗の結果を返す
     return {host: success}
 
-async def ping_multiple_hosts(ping_count, max_rtt, max_packet_loss, kyoten_name, test_type, list_ping_eval, results_dir):
+async def ping_multiple_hosts(is_win, is_ja, ping_count, max_rtt, max_packet_loss, kyoten_name, test_type, list_ping_eval, results_dir):
     tasks = []
     for index, dict_ping_eval in enumerate(list_ping_eval, start=1):
         host = list(dict_ping_eval.keys())[0]
         expected_status = dict_ping_eval[host]
-        task = asyncio.create_task(process_ping(ping_count, max_rtt, max_packet_loss,kyoten_name, test_type, index, host, expected_status, results_dir))
+        task = asyncio.create_task(process_ping(is_win, is_ja, ping_count, max_rtt, max_packet_loss,kyoten_name, test_type, index, host, expected_status, results_dir))
         tasks.append(task)
     return await asyncio.gather(*tasks)
 
@@ -249,10 +210,10 @@ def validate_route(output, list_expected_route):
     list_ip = extract_ips(output.splitlines())
     return check_route_match(list_ip, list_expected_route)
 
-async def traceroute(host):
+async def traceroute(cmd_args):
     """tracerouteコマンドを非同期で実行"""
     proc = await asyncio.create_subprocess_exec(
-        'traceroute', '-n', '-m 10', host, 
+        *cmd_args, 
         stdout=subprocess.PIPE, 
         stderr=subprocess.PIPE
     )
@@ -260,10 +221,14 @@ async def traceroute(host):
     return stdout.decode()
 
 # 非同期でホストへのtracerouteを実行し、結果を評価する関数
-async def trace_and_validate(host, list_expected_route):
+async def trace_and_validate(is_win, host, list_expected_route):
+    cmd = 'tracert' if is_win else 'traceroute'
+    opt = '-h 10' if is_win else ('-n', '-m', '10')
+    cmd_args = [cmd, opt, host]if is_win else [cmd] + list(opt) + [host]
+
     """ホストにtracerouteを実行して、結果を評価"""
     print(f"{host} の経路を確認中...")
-    trace_output = await traceroute(host)  # traceroute関数は非同期で実行
+    trace_output = await traceroute(cmd_args)  # traceroute関数は非同期で実行
     print(trace_output)
 
     # 経路の結果をバリデート
@@ -277,10 +242,10 @@ async def trace_and_validate(host, list_expected_route):
     # tracerouteの結果と評価結果を返す
     return trace_output, success
 
-async def process_trace(kyoten_name, test_type, index, host, list_expected_route, results_dir):
+async def process_trace(is_win, is_ja, kyoten_name, test_type, index, host, list_expected_route, results_dir):
     """個別のホストのtracerouteを処理"""
     # tracerouteを実行して結果を評価
-    trace_output, success = await trace_and_validate(host, list_expected_route)
+    trace_output, success = await trace_and_validate(is_win, host, list_expected_route)
 
     # 結果をログファイルに保存
     await save_results(kyoten_name, test_type, index, host, trace_output, results_dir, "traceroute")
@@ -288,17 +253,17 @@ async def process_trace(kyoten_name, test_type, index, host, list_expected_route
     # 成功/失敗の結果を返す
     return {host: success}
 
-async def trace_multiple_hosts(kyoten_name, test_type, list_trace_eval, results_dir):
+async def trace_multiple_hosts(is_win, is_ja, kyoten_name, test_type, list_trace_eval, results_dir):
     tasks = []
     for index, dict_trace_eval in enumerate(list_trace_eval, start=1):
         host = list(dict_trace_eval.keys())[0]
         list_expected_route = dict_trace_eval[host]
-        task = asyncio.create_task(process_trace(kyoten_name, test_type, index, host, list_expected_route, results_dir))
+        task = asyncio.create_task(process_trace(is_win, is_ja, kyoten_name, test_type, index, host, list_expected_route, results_dir))
         tasks.append(task)
     
     return await asyncio.gather(*tasks)
 
-async def ping_trace_multiple_hosts(ping_count, max_rtt, max_packet_loss, list_ping_eval, list_trace_eval, selected_kyoten_name, selected_test_type):
+async def ping_trace_multiple_hosts(is_win, is_ja, ping_count, max_rtt, max_packet_loss, list_ping_eval, list_trace_eval, selected_kyoten_name, selected_test_type):
     ping_results = {}
     trace_results = {}
     
@@ -308,8 +273,8 @@ async def ping_trace_multiple_hosts(ping_count, max_rtt, max_packet_loss, list_p
     # フォルダが存在しなければ作成
     os.makedirs(results_dir, exist_ok=True)
     
-    ping_results = await ping_multiple_hosts(ping_count, max_rtt, max_packet_loss, selected_kyoten_name, selected_test_type, list_ping_eval, results_dir)
-    trace_results = await trace_multiple_hosts(selected_kyoten_name, selected_test_type, list_trace_eval, results_dir)
+    ping_results = await ping_multiple_hosts(is_win, is_ja, ping_count, max_rtt, max_packet_loss, selected_kyoten_name, selected_test_type, list_ping_eval, results_dir)
+    trace_results = await trace_multiple_hosts(is_win, is_ja, selected_kyoten_name, selected_test_type, list_trace_eval, results_dir)
     return ping_results, trace_results, results_dir
 
 # 結果を辞書に変換する関数
@@ -473,7 +438,6 @@ def write_results_to_excel(ping_results, trace_results, excel_file, df_test_eval
         host = list(ping.keys())[0]  # ホスト名取得
         # TODO: hostでdfを検索し該当するnameを取得する
         name = get_name_by_host(df_test_eval, host)
-        print(f"name = {name}")
         ping_result = '○' if list(ping.values())[0] else '×'
         trace_result = '○' if list(trace.values())[0] else '×'
         data.append([i, name, host, ping_result, trace_result])
@@ -526,10 +490,74 @@ def format_excel_file(excel_file):
     # Excelファイルを保存
     wb.save(excel_file)
     print(f"'{excel_file}' のフォーマットが完了しました。")
-       
+
+def is_windows():
+    """Windowsかどうかを判定"""
+    return platform.system().lower() == 'windows'
+
+def is_mac():
+    """Macかどうかを判定"""
+    return platform.system().lower() == 'darwin'
+
+def get_os_language():
+    """OSの言語設定を取得し、日本語版か英語版かを判定"""
+    lang, _ = locale.getdefaultlocale()  # ロケール情報を取得
+    
+    if lang == 'ja_JP':
+        return 'Japanese'
+    elif lang.startswith('en'):
+        return 'English'
+    else:
+        return 'Other'
+
+def is_japanese_os():
+    """OSが日本語版かどうかを判定"""
+    return get_os_language() == 'Japanese'
+
+def is_english_os():
+    """OSが英語版かどうかを判定"""
+    return get_os_language() == 'English'
+
+class UnsupportedOSError(Exception):
+    """サポートされていないOSのための例外"""
+    pass
+
+class UnsupportedLanguageError(Exception):
+    """サポートされていない言語のための例外"""
+    pass
+
+def check_os_and_language():
+    """
+    OSと言語をチェックする関数。
+    Windowsで日本語または英語がサポートされているか確認します。
+    
+    Returns:
+        is_win (bool): Windowsかどうか
+        is_ja (bool): 日本語OSかどうか
+    """
+    is_win = False
+    is_ja = False
+
+    if is_windows():
+        is_win = True
+        if is_japanese_os():
+            is_ja = True
+        elif is_english_os():
+            pass
+        else:
+            raise UnsupportedLanguageError("サポートされていない言語です。")
+    elif is_mac():
+        pass
+    else:
+        raise UnsupportedOSError('サポートされていないOSです。')
+    
+    return is_win, is_ja
+     
 # テスト実行
 def main():
     try:
+        is_win, is_ja = check_os_and_language()
+            
         # configファイルから設定値の読み込み
         ping_count, max_rtt, max_packet_loss = load_config(config_path='../settings/setting.yml')
 
@@ -544,6 +572,8 @@ def main():
         # 複数のホストと期待されるpingの結果とtrace経路のリスト
         list_ping_eval, list_trace_eval = convert_to_list(df_test_eval)
         ping_results, trace_results, results_dir = asyncio.run(ping_trace_multiple_hosts(
+            is_win = is_win,
+            is_ja = is_ja,
             ping_count = ping_count,
             max_rtt = max_rtt,
             max_packet_loss = max_packet_loss,

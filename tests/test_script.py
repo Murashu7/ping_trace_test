@@ -9,7 +9,7 @@ from unittest import mock
 from script import save_results, extract_ips, check_route_match, validate_ping, validate_route, ping, ping_multiple_hosts, \
     traceroute, trace_multiple_hosts, convert_to_list, select_kyoten, select_test_type, get_test_type_path, SelectionError, \
     generate_unique_filename, get_name_by_host, evaluate_ping_result, validate_ping_windows, is_windows, is_mac, UnsupportedOSError, \
-    UnsupportedLanguageError, validate_ping_mac
+    UnsupportedLanguageError, validate_ping_mac, check_os_and_language, is_japanese_os, is_english_os
     
 @pytest.mark.asyncio
 async def test_save_results_ping(tmpdir):
@@ -337,28 +337,29 @@ def test_check_route_match():
     list_expected_route = ['9.9.9.9']
     assert check_route_match(list_ip, list_expected_route) == False
 
-# tracerouteの経路検証関数のテスト
-def test_validate_route_success():
-    trace_output = """
-    traceroute to google.com (8.8.8.8), 30 hops max
-    1  192.168.1.1  1.123 ms
-    2  10.0.0.1  5.456 ms
-    3  8.8.8.8  2.789 ms
-    """
-    expected_route = ['192.168.1.1', '10.0.0.1', '8.8.8.8']
-    
-    assert validate_route(trace_output, expected_route) == True
+class TestValidateRoute:
 
-def test_validate_route_failure():
-    trace_output = """
-    traceroute to google.com (8.8.8.8), 30 hops max
-    1  192.168.1.1  1.123 ms
-    2  10.0.0.1  5.456 ms
-    3  8.8.8.8  2.789 ms
-    """
-    expected_route = ['9.9.9.9']
-    
-    assert validate_route(trace_output, expected_route) == False
+    def test_validate_route_success(self):
+        trace_output = """
+        traceroute to google.com (8.8.8.8), 30 hops max
+        1  192.168.1.1  1.123 ms
+        2  10.0.0.1  5.456 ms
+        3  8.8.8.8  2.789 ms
+        """
+        expected_route = ['192.168.1.1', '10.0.0.1', '8.8.8.8']
+        
+        assert validate_route(trace_output, expected_route) == True
+
+    def test_validate_route_failure(self):
+        trace_output = """
+        traceroute to google.com (8.8.8.8), 30 hops max
+        1  192.168.1.1  1.123 ms
+        2  10.0.0.1  5.456 ms
+        3  8.8.8.8  2.789 ms
+        """
+        expected_route = ['9.9.9.9']
+        
+        assert validate_route(trace_output, expected_route) == False
     
 @pytest.mark.asyncio
 async def test_traceroute():
@@ -464,69 +465,73 @@ def sample_df():
     }
     return pd.DataFrame(data)
 
-def test_select_kyoten_valid_input(sample_df):
-    user_input = '1'  # 正しい入力
-    with patch('builtins.input', return_value=user_input):
-        selected_name, selected_type = select_kyoten(sample_df)
-        
-        assert selected_name == '拠点A'
-        assert selected_type == 'タイプ1'
+class TestSelectKyoten:
 
-def test_select_kyoten_invalid_input(sample_df):
-    user_inputs = ['4', 'invalid', '2']  # 最初は無効、次に無効、最後に有効な入力
-    with patch('builtins.input', side_effect=user_inputs):
-        selected_name, selected_type = select_kyoten(sample_df)
-        
-        assert selected_name == '拠点B'
-        assert selected_type == 'タイプ2'
+    def test_select_kyoten_valid_input(self, sample_df):
+        user_input = '1'  # 正しい入力
+        with patch('builtins.input', return_value=user_input):
+            selected_name, selected_type = select_kyoten(sample_df)
 
-def test_select_kyoten_multiple_invalid_input(sample_df):
-    user_inputs = ['invalid', 'invalid', '3']  # 全て無効、最後に有効な入力
-    with patch('builtins.input', side_effect=user_inputs):
-        selected_name, selected_type = select_kyoten(sample_df)
-        
-        assert selected_name == '拠点C'
-        assert selected_type == 'タイプ3'
+            assert selected_name == '拠点A'
+            assert selected_type == 'タイプ1'
 
-def test_select_test_type_large():
-    selected_kyoten_type = '大規模'
-    user_input = '1'  # 正しい入力
-    with patch('builtins.input', return_value=user_input):
-        selected_test_type = select_test_type(selected_kyoten_type)
+    def test_select_kyoten_invalid_input(self, sample_df):
+        user_inputs = ['4', 'invalid', '2']  # 最初は無効、次に無効、最後に有効な入力
+        with patch('builtins.input', side_effect=user_inputs):
+            selected_name, selected_type = select_kyoten(sample_df)
 
-        assert selected_test_type == '正常性試験'
+            assert selected_name == '拠点B'
+            assert selected_type == 'タイプ2'
 
-def test_select_test_type_medium():
-    selected_kyoten_type = '中規模'
-    user_input = '2'  # 正しい入力
-    with patch('builtins.input', return_value=user_input):
-        selected_test_type = select_test_type(selected_kyoten_type)
+    def test_select_kyoten_multiple_invalid_input(self, sample_df):
+        user_inputs = ['invalid', 'invalid', '3']  # 全て無効、最後に有効な入力
+        with patch('builtins.input', side_effect=user_inputs):
+            selected_name, selected_type = select_kyoten(sample_df)
 
-        assert selected_test_type == '帯域保証網試験'
+            assert selected_name == '拠点C'
+            assert selected_type == 'タイプ3'
 
-def test_select_test_type_small():
-    selected_kyoten_type = '小規模'
-    user_input = '3'  # 正しい入力
-    with patch('builtins.input', return_value=user_input):
-        selected_test_type = select_test_type(selected_kyoten_type)
+class TestSelectTestType:
 
-        assert selected_test_type == '復旧試験'
+    def test_select_test_type_large(self):
+        selected_kyoten_type = '大規模'
+        user_input = '1'  # 正しい入力
+        with patch('builtins.input', return_value=user_input):
+            selected_test_type = select_test_type(selected_kyoten_type)
 
-def test_select_test_type_invalid_input():
-    selected_kyoten_type = '大規模'
-    user_inputs = ['invalid', '3']  # 最初は無効、次に有効な入力
-    with patch('builtins.input', side_effect=user_inputs):
-        selected_test_type = select_test_type(selected_kyoten_type)
+            assert selected_test_type == '正常性試験'
 
-        assert selected_test_type == 'ベストエフォート網試験'
+    def test_select_test_type_medium(self):
+        selected_kyoten_type = '中規模'
+        user_input = '2'  # 正しい入力
+        with patch('builtins.input', return_value=user_input):
+            selected_test_type = select_test_type(selected_kyoten_type)
 
-def test_select_test_type_not_exist():
-    selected_kyoten_type = '中規模'
-    user_inputs = ['6', '1']  # 最初は存在しない番号、次に有効な番号
-    with patch('builtins.input', side_effect=user_inputs):
-        selected_test_type = select_test_type(selected_kyoten_type)
+            assert selected_test_type == '帯域保証網試験'
 
-        assert selected_test_type == '正常性試験'
+    def test_select_test_type_small(self):
+        selected_kyoten_type = '小規模'
+        user_input = '3'  # 正しい入力
+        with patch('builtins.input', return_value=user_input):
+            selected_test_type = select_test_type(selected_kyoten_type)
+
+            assert selected_test_type == '復旧試験'
+
+    def test_select_test_type_invalid_input(self):
+        selected_kyoten_type = '大規模'
+        user_inputs = ['invalid', '3']  # 最初は無効、次に有効な入力
+        with patch('builtins.input', side_effect=user_inputs):
+            selected_test_type = select_test_type(selected_kyoten_type)
+
+            assert selected_test_type == 'ベストエフォート網試験'
+
+    def test_select_test_type_not_exist(self):
+        selected_kyoten_type = '中規模'
+        user_inputs = ['6', '1']  # 最初は存在しない番号、次に有効な番号
+        with patch('builtins.input', side_effect=user_inputs):
+            selected_test_type = select_test_type(selected_kyoten_type)
+
+            assert selected_test_type == '正常性試験'
         
 # テスト用のCSVデータを用意
 TEST_CSV_DATA = """
@@ -537,110 +542,146 @@ kyoten_type,test_type,file_name
 小規模,復旧試験,test_type_d.csv
 """
 
-@pytest.fixture
-def mock_test_info_csv(tmpdir):
-    """テスト用のCSVファイルを一時的に作成するフィクスチャ"""
-    test_info_path = tmpdir.join("test_info.csv")
-    with open(test_info_path, 'w') as f:
-        f.write(TEST_CSV_DATA)
-    return str(test_info_path)
+class TestGetTestTypePath:
 
-def test_get_test_type_path_valid(mock_test_info_csv):
-    """有効な選択肢に対して正しいファイルパスを返すことをテスト"""
-    result_1 = get_test_type_path("大規模", "正常性試験", mock_test_info_csv)
-    assert result_1 == "../settings/test_type_a.csv"
-    result_2 = get_test_type_path("中規模", "正常性試験", mock_test_info_csv)
-    assert result_2 == "../settings/test_type_c.csv"
-    
-def test_get_test_type_path_invalid_type(mock_test_info_csv):
-    """無効な拠点タイプに対して例外が発生することをテスト"""
-    with pytest.raises(SelectionError, match="選択された拠点タイプまたは試験タイプが見つかりませんでした。"):
-        get_test_type_path("無効なタイプ", "正常性試験", mock_test_info_csv)
+    @pytest.fixture
+    def mock_test_info_csv(self, tmpdir):
+        """テスト用のCSVファイルを一時的に作成するフィクスチャ"""
+        test_info_path = tmpdir.join("test_info.csv")
+        with open(test_info_path, 'w') as f:
+            f.write(TEST_CSV_DATA)
+        return str(test_info_path)
 
-def test_get_test_type_path_invalid_test(mock_test_info_csv):
-    """無効な試験タイプに対して例外が発生することをテスト"""
-    with pytest.raises(SelectionError, match="選択された拠点タイプまたは試験タイプが見つかりませんでした。"):
-        get_test_type_path("大規模", "無効な試験", mock_test_info_csv)
+    def test_get_test_type_path_valid(self, mock_test_info_csv):
+        """有効な選択肢に対して正しいファイルパスを返すことをテスト"""
+        result_1 = get_test_type_path("大規模", "正常性試験", mock_test_info_csv)
+        assert result_1 == "../settings/test_type_a.csv"
+        result_2 = get_test_type_path("中規模", "正常性試験", mock_test_info_csv)
+        assert result_2 == "../settings/test_type_c.csv"
 
-def test_get_test_type_path_invalid_both(mock_test_info_csv):
-    """無効な拠点タイプと試験タイプに対して例外が発生することをテスト"""
-    with pytest.raises(SelectionError, match="選択された拠点タイプまたは試験タイプが見つかりませんでした。"):
-        get_test_type_path("無効なタイプ", "無効な試験", mock_test_info_csv)
+    def test_get_test_type_path_invalid_type(self, mock_test_info_csv):
+        """無効な拠点タイプに対して例外が発生することをテスト"""
+        with pytest.raises(SelectionError, match="選択された拠点タイプまたは試験タイプが見つかりませんでした。"):
+            get_test_type_path("無効なタイプ", "正常性試験", mock_test_info_csv)
+
+    def test_get_test_type_path_invalid_test(self, mock_test_info_csv):
+        """無効な試験タイプに対して例外が発生することをテスト"""
+        with pytest.raises(SelectionError, match="選択された拠点タイプまたは試験タイプが見つかりませんでした。"):
+            get_test_type_path("大規模", "無効な試験", mock_test_info_csv)
+
+    def test_get_test_type_path_invalid_both(self, mock_test_info_csv):
+        """無効な拠点タイプと試験タイプに対して例外が発生することをテスト"""
+        with pytest.raises(SelectionError, match="選択された拠点タイプまたは試験タイプが見つかりませんでした。"):
+            get_test_type_path("無効なタイプ", "無効な試験", mock_test_info_csv)
         
-@mock.patch('os.path.exists')
-def test_generate_unique_filename_first_call(mock_exists):
-    """
-    最初のファイル生成時のテスト: ファイルが存在しない場合、インクリメントされないことを確認。
-    """
-    mock_exists.return_value = False  # ファイルが存在しない場合
-    
-    results_dir = '../files'
-    selected_kyoten_name = 'kyoten_name'
-    selected_test_type = 'test_type'
-    
-    expected_filename = f'{results_dir}/{selected_kyoten_name}_{selected_test_type}_判定表.xlsx'
-    generated_filename = generate_unique_filename(results_dir, selected_kyoten_name, selected_test_type)
-    
-    assert generated_filename == expected_filename
+class TestGenerateUniqueFilename:
 
-@mock.patch('os.path.exists')
-def test_generate_unique_filename_second_call(mock_exists):
-    """
-    2回目のファイル生成時のテスト: 同じ名前のファイルが存在する場合、(1)が付くことを確認。
-    """
-    # 1回目は存在しないが、2回目は存在する
-    mock_exists.side_effect = [True, False]
-    
-    results_dir = '../files'
-    selected_kyoten_name = 'kyoten_name'
-    selected_test_type = 'test_type'
-    
-    expected_filename = f'{results_dir}/{selected_kyoten_name}_{selected_test_type}_判定表(1).xlsx'
-    generated_filename = generate_unique_filename(results_dir, selected_kyoten_name, selected_test_type)
-    
-    assert generated_filename == expected_filename
+    @mock.patch('os.path.exists')
+    def test_generate_unique_filename_first_call(self, mock_exists):
+        """
+        最初のファイル生成時のテスト: ファイルが存在しない場合、インクリメントされないことを確認。
+        """
+        mock_exists.return_value = False  # ファイルが存在しない場合
 
-@mock.patch('os.path.exists')
-def test_generate_unique_filename_third_call(mock_exists):
-    """
-    3回目のファイル生成時のテスト: 連続してファイルが存在する場合、(2)が付くことを確認。
-    """
-    # 1回目と2回目は存在し、3回目は存在しない
-    mock_exists.side_effect = [True, True, False]
-    
-    results_dir = '../files'
-    selected_kyoten_name = 'kyoten_name'
-    selected_test_type = 'test_type'
-    
-    expected_filename = f'{results_dir}/{selected_kyoten_name}_{selected_test_type}_判定表(2).xlsx'
-    generated_filename = generate_unique_filename(results_dir, selected_kyoten_name, selected_test_type)
-    
-    assert generated_filename == expected_filename
-    
-@pytest.fixture
-def df():
-    data = {
-        'dest': ['8.8.8.8', '8.8.4.4', '100.100.100.100'],
-        'name': ['google_dns_1', 'google_dns_2', 'yahoo'],
-        'data1': ['data_1', 'data_2', 'data_3'],
-        'data2': ['data_1', 'data_2', 'data_3'],
-        'data3': ['data_1', 'data_2', 'data_3'],
-    }
-    return pd.DataFrame(data)
+        results_dir = '../files'
+        selected_kyoten_name = 'kyoten_name'
+        selected_test_type = 'test_type'
 
-# 正常なホスト名でのテストケース
-def test_get_name_by_host_valid(df):
-    assert get_name_by_host(df, '8.8.8.8') == 'google_dns_1'
-    assert get_name_by_host(df, '100.100.100.100') == 'yahoo'
+        expected_filename = f'{results_dir}/{selected_kyoten_name}_{selected_test_type}_判定表.xlsx'
+        generated_filename = generate_unique_filename(results_dir, selected_kyoten_name, selected_test_type)
 
-# 存在しないホスト名でのテストケース
-def test_get_name_by_host_invalid(df):
-    assert get_name_by_host(df, '1.1.1.1') is None
+        assert generated_filename == expected_filename
 
-# 空のホスト名でのテストケース
-def test_get_name_by_host_empty(df):
-    assert get_name_by_host(df, '') is None
+    @mock.patch('os.path.exists')
+    def test_generate_unique_filename_second_call(self, mock_exists):
+        """
+        2回目のファイル生成時のテスト: 同じ名前のファイルが存在する場合、(1)が付くことを確認。
+        """
+        # 1回目は存在しないが、2回目は存在する
+        mock_exists.side_effect = [True, False]
 
-# Noneホスト名でのテストケース
-def test_get_name_by_host_none(df):
-    assert get_name_by_host(df, None) is None
+        results_dir = '../files'
+        selected_kyoten_name = 'kyoten_name'
+        selected_test_type = 'test_type'
+
+        expected_filename = f'{results_dir}/{selected_kyoten_name}_{selected_test_type}_判定表(1).xlsx'
+        generated_filename = generate_unique_filename(results_dir, selected_kyoten_name, selected_test_type)
+
+        assert generated_filename == expected_filename
+
+    @mock.patch('os.path.exists')
+    def test_generate_unique_filename_third_call(self, mock_exists):
+        """
+        3回目のファイル生成時のテスト: 連続してファイルが存在する場合、(2)が付くことを確認。
+        """
+        # 1回目と2回目は存在し、3回目は存在しない
+        mock_exists.side_effect = [True, True, False]
+
+        results_dir = '../files'
+        selected_kyoten_name = 'kyoten_name'
+        selected_test_type = 'test_type'
+
+        expected_filename = f'{results_dir}/{selected_kyoten_name}_{selected_test_type}_判定表(2).xlsx'
+        generated_filename = generate_unique_filename(results_dir, selected_kyoten_name, selected_test_type)
+
+        assert generated_filename == expected_filename
+    
+class TestGetNameByHost:
+
+    @pytest.fixture
+    def df(self):
+        data = {
+            'dest': ['8.8.8.8', '8.8.4.4', '100.100.100.100'],
+            'name': ['google_dns_1', 'google_dns_2', 'yahoo'],
+            'data1': ['data_1', 'data_2', 'data_3'],
+            'data2': ['data_1', 'data_2', 'data_3'],
+            'data3': ['data_1', 'data_2', 'data_3'],
+        }
+        return pd.DataFrame(data)
+
+    # 正常なホスト名でのテストケース
+    def test_get_name_by_host_valid(self, df):
+        assert get_name_by_host(df, '8.8.8.8') == 'google_dns_1'
+        assert get_name_by_host(df, '100.100.100.100') == 'yahoo'
+
+    # 存在しないホスト名でのテストケース
+    def test_get_name_by_host_invalid(self, df):
+        assert get_name_by_host(df, '1.1.1.1') is None
+
+    # 空のホスト名でのテストケース
+    def test_get_name_by_host_empty(self, df):
+        assert get_name_by_host(df, '') is None
+
+    # Noneホスト名でのテストケース
+    def test_get_name_by_host_none(self, df):
+        assert get_name_by_host(df, None) is None
+
+
+class TestCheckOSAndLanguage:
+
+    @patch('script.is_windows', return_value=True)
+    @patch('script.is_japanese_os', return_value=True)
+    @patch('script.is_english_os', return_value=False)
+    def test_check_os_and_language_japanese(self, mock_is_english, mock_is_japanese, mock_is_windows):
+        result = check_os_and_language()
+        assert result == (True, True)
+
+    @patch('script.is_windows', return_value=True)
+    @patch('script.is_japanese_os', return_value=False)
+    @patch('script.is_english_os', return_value=True)
+    def test_check_os_and_language_english(self, mock_is_english, mock_is_japanese, mock_is_windows):
+        result = check_os_and_language()
+        assert result == (True, False)
+
+    @patch('script.is_windows', return_value=True)
+    @patch('script.is_japanese_os', return_value=False)
+    @patch('script.is_english_os', return_value=False)
+    def test_check_os_and_language_unsupported_language(self, mock_is_english, mock_is_japanese, mock_is_windows):
+        with pytest.raises(UnsupportedLanguageError):
+            check_os_and_language()
+
+    @patch('script.is_mac', return_value=False)
+    @patch('script.is_windows', return_value=False)
+    def test_check_os_and_language_unsupported_os(self, mock_is_windows, mock_is_mac):
+        with pytest.raises(UnsupportedOSError):
+            check_os_and_language()
