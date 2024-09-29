@@ -151,15 +151,15 @@ class TestPing:
             assert result == 'PING 8.8.8.8'
 
 class TestEvalutePingResult:      
-    @pytest.mark.parametrize("packet_loss, avg_rtt, max_rtt, max_packet_loss, expected", [
+    @pytest.mark.parametrize("packet_loss, avg_rtt, average_rtt, max_packet_loss, expected", [
         (0, 50, 100, 20, True),    # パケットロスとRTTが閾値以下 -> 成功
         (15, 90, 100, 20, True),   # パケットロスとRTTが閾値以下 -> 成功
         (25, 90, 100, 20, False),  # パケットロスが閾値を超えている -> 失敗
         (15, 120, 100, 20, False), # RTTが閾値を超えている -> 失敗
         (25, 120, 100, 20, False), # パケットロスとRTT両方が閾値を超えている -> 失敗
     ])
-    def test_evaluate_ping_result(self, packet_loss, avg_rtt, max_rtt, max_packet_loss, expected):
-        result = evaluate_ping_result(packet_loss, avg_rtt, max_rtt, max_packet_loss)
+    def test_evaluate_ping_result(self, packet_loss, avg_rtt, average_rtt, max_packet_loss, expected):
+        result = evaluate_ping_result(packet_loss, avg_rtt, average_rtt, max_packet_loss)
         assert result == expected, f"Test failed for packet_loss={packet_loss}, avg_rtt={avg_rtt}"
 
 class TestValidatePingWindows:
@@ -283,16 +283,16 @@ class TestValidatePingMac:
 
 class TestValidatePing:
     
-    @pytest.mark.parametrize("is_win, is_ja, max_rtt, max_packet_loss, output, expected_status, expected_result", [
+    @pytest.mark.parametrize("is_win, is_ja, average_rtt, max_packet_loss, output, expected_status, expected_result", [
         # Test case 1: expected_status is 'ng' and output indicates failure (timeout)
         (True, True, 100, 0, "要求がタイムアウトしました", 'ng', True),
         # Test case 2: expected_status is 'ng' and output does not indicate failure
         (True, True, 100, 0, "Reply from 8.8.8.8: bytes=32 time=50ms TTL=56", 'ng', False),
-        # Test case 3: expected_status is 'ok' and Windows ping passes (max_rtt, max_packet_loss under limit)
+        # Test case 3: expected_status is 'ok' and Windows ping passes (average_rtt, max_packet_loss under limit)
         (True, False, 100, 0, "0% loss, Average = 50ms", 'ok', True),
         # Test case 4: expected_status is 'ok' but ping fails on Windows (timeout)
         (True, False, 100, 0, "Request timed out", 'ok', False),
-        # Test case 5: expected_status is 'ok' and Mac ping passes (max_rtt, max_packet_loss under limit)
+        # Test case 5: expected_status is 'ok' and Mac ping passes (average_rtt, max_packet_loss under limit)
         (False, False, 100, 0, "10 packets transmitted, 10 packets received, 0.0% packet loss, time 9015ms\n"
          "round-trip min/avg/max/stddev = 10.2/15.4/20.3/3.2 ms", 'ok', True),
         # Test case 6: expected_status is 'ng' and Mac ping fails (unreachable)
@@ -300,12 +300,12 @@ class TestValidatePing:
         # Test case 7: output is None
         (False, False, 100, 0, None, 'ok', False)
     ])
-    def test_validate_ping(self, is_win, is_ja, max_rtt, max_packet_loss, output, expected_status, expected_result):
+    def test_validate_ping(self, is_win, is_ja, average_rtt, max_packet_loss, output, expected_status, expected_result):
         """
         validate_ping 関数の出力が期待される結果と一致するかどうかを確認するテスト
         """
         # validate_ping 関数の結果が期待通りかどうかを確認
-        result = validate_ping(is_win, is_ja, max_rtt, max_packet_loss, output, expected_status)
+        result = validate_ping(is_win, is_ja, average_rtt, max_packet_loss, output, expected_status)
         assert result == expected_result
 
 class TestPingAndValidate:
@@ -394,7 +394,7 @@ class TestProcessPing:
         is_win = True
         is_ja = False
         ping_count = '4'
-        max_rtt = 100
+        average_rtt = 100
         max_packet_loss = 10
         kyoten_name = 'Test Kyoten'
         test_type = 'Test Type'
@@ -408,10 +408,10 @@ class TestProcessPing:
              mock.patch('script.save_results') as mock_save_results:
 
             # 関数の実行
-            result = await process_ping(is_win, is_ja, ping_count, max_rtt, max_packet_loss, kyoten_name, test_type, index, host, expected_status, results_dir)
+            result = await process_ping(is_win, is_ja, ping_count, average_rtt, max_packet_loss, kyoten_name, test_type, index, host, expected_status, results_dir)
 
             # 期待される呼び出しを確認
-            mock_ping_and_validate.assert_called_once_with(is_win, is_ja, ping_count, max_rtt, max_packet_loss, host, expected_status)
+            mock_ping_and_validate.assert_called_once_with(is_win, is_ja, ping_count, average_rtt, max_packet_loss, host, expected_status)
             mock_save_results.assert_called_once_with(kyoten_name, test_type, index, host, 'Ping output', results_dir, 'ping')
 
             # 戻り値の確認
@@ -423,7 +423,7 @@ class TestProcessPing:
         is_win = True
         is_ja = False
         ping_count = '4'
-        max_rtt = 100
+        average_rtt = 100
         max_packet_loss = 10
         kyoten_name = 'Test Kyoten'
         test_type = 'Test Type'
@@ -437,10 +437,10 @@ class TestProcessPing:
              mock.patch('script.save_results') as mock_save_results:
 
             # 関数の実行
-            result = await process_ping(is_win, is_ja, ping_count, max_rtt, max_packet_loss, kyoten_name, test_type, index, host, expected_status, results_dir)
+            result = await process_ping(is_win, is_ja, ping_count, average_rtt, max_packet_loss, kyoten_name, test_type, index, host, expected_status, results_dir)
 
             # 期待される呼び出しを確認
-            mock_ping_and_validate.assert_called_once_with(is_win, is_ja, ping_count, max_rtt, max_packet_loss, host, expected_status)
+            mock_ping_and_validate.assert_called_once_with(is_win, is_ja, ping_count, average_rtt, max_packet_loss, host, expected_status)
             mock_save_results.assert_called_once_with(kyoten_name, test_type, index, host, 'Ping output', results_dir, 'ping')
 
             # 戻り値の確認
@@ -453,7 +453,7 @@ class TestPingMultipleHosts:
         is_win = True
         is_ja = False
         ping_count = '4'
-        max_rtt = 100
+        average_rtt = 100
         max_packet_loss = 10
         kyoten_name = 'Test Kyoten'
         test_type = 'Test Type'
@@ -474,14 +474,14 @@ class TestPingMultipleHosts:
             ]
 
             # 関数の実行
-            result = await ping_multiple_hosts(is_win, is_ja, ping_count, max_rtt, max_packet_loss, kyoten_name, test_type, list_ping_eval, results_dir)
+            result = await ping_multiple_hosts(is_win, is_ja, ping_count, average_rtt, max_packet_loss, kyoten_name, test_type, list_ping_eval, results_dir)
 
             # モックが期待通りに呼び出されたかを確認
             assert mock_process_ping.call_count == 2
 
             # 呼び出し順序の確認
-            mock_process_ping.assert_any_call(is_win, is_ja, ping_count, max_rtt, max_packet_loss, kyoten_name, test_type, 1, 'localhost', 'ok', results_dir)
-            mock_process_ping.assert_any_call(is_win, is_ja, ping_count, max_rtt, max_packet_loss, kyoten_name, test_type, 2, 'example.com', 'ng', results_dir)
+            mock_process_ping.assert_any_call(is_win, is_ja, ping_count, average_rtt, max_packet_loss, kyoten_name, test_type, 1, 'localhost', 'ok', results_dir)
+            mock_process_ping.assert_any_call(is_win, is_ja, ping_count, average_rtt, max_packet_loss, kyoten_name, test_type, 2, 'example.com', 'ng', results_dir)
 
             # 戻り値の確認
             assert result == [
@@ -493,7 +493,7 @@ class TestPingMultipleHosts:
         is_win = True
         is_ja = False
         ping_count = '4'
-        max_rtt = 100
+        average_rtt = 100
         max_packet_loss = 10
         kyoten_name = 'Test Kyoten'
         test_type = 'Test Type'
@@ -503,7 +503,7 @@ class TestPingMultipleHosts:
         list_ping_eval = []
 
         with mock.patch('script.process_ping') as mock_process_ping:
-            result = await ping_multiple_hosts(is_win, is_ja, ping_count, max_rtt, max_packet_loss, kyoten_name, test_type, list_ping_eval, results_dir)
+            result = await ping_multiple_hosts(is_win, is_ja, ping_count, average_rtt, max_packet_loss, kyoten_name, test_type, list_ping_eval, results_dir)
 
             # モックが呼び出されないことを確認
             mock_process_ping.assert_not_called()
@@ -605,11 +605,12 @@ class TestTraceAndValidate:
         mock_validate_route.return_value = True  # 期待される経路に一致
 
         is_win = True
+        max_hop = 10
         host = 'localhost'
         list_expected_route = ['192.168.1.1', '10.0.0.1', '8.8.8.8']
 
         # 関数を呼び出す
-        result = await trace_and_validate(is_win, host, list_expected_route)
+        result = await trace_and_validate(is_win, max_hop, host, list_expected_route)
 
         # 戻り値の確認
         assert result == (mock_traceroute.return_value, True)
@@ -626,11 +627,12 @@ class TestTraceAndValidate:
         mock_validate_route.return_value = False  # 期待される経路に一致しない
 
         is_win = True
+        max_hop = 10
         host = 'localhost'
         list_expected_route = ['192.168.1.1', '10.0.0.1', '1.1.1.1']  # 不一致
 
         # 関数を呼び出す
-        result = await trace_and_validate(is_win, host, list_expected_route)
+        result = await trace_and_validate(is_win, max_hop, host, list_expected_route)
 
         # 戻り値の確認
         assert result == (mock_traceroute.return_value, False)
@@ -647,11 +649,12 @@ class TestTraceAndValidate:
         mock_validate_route.return_value = True  # 期待される経路に一致
 
         is_win = False
+        max_hop = 10
         host = '8.8.8.8'
         list_expected_route = ['192.168.1.1', '10.0.0.1', '8.8.8.8']
 
         # 関数を呼び出す
-        result = await trace_and_validate(is_win, host, list_expected_route)
+        result = await trace_and_validate(is_win, max_hop, host, list_expected_route)
 
         # 戻り値の確認
         assert result == (mock_traceroute.return_value, True)
@@ -668,11 +671,12 @@ class TestTraceAndValidate:
         mock_validate_route.return_value = False  # 期待される経路に一致しない
 
         is_win = False
+        max_hop = 10
         host = '8.8.8.8'
         list_expected_route = ['192.168.1.1', '10.0.0.1', '1.1.1.1']  # 不一致
 
         # 関数を呼び出す
-        result = await trace_and_validate(is_win, host, list_expected_route)
+        result = await trace_and_validate(is_win, max_hop, host, list_expected_route)
 
         # 戻り値の確認
         assert result == (mock_traceroute.return_value, False)
@@ -692,7 +696,7 @@ class TestProcessTrace:
         mock_trace_and_validate.return_value = ("traceroute output", True)
 
         is_win = True
-        is_ja = False
+        max_hop = 10
         kyoten_name = 'Tokyo'
         test_type = 'PingTest'
         index = 1
@@ -701,13 +705,13 @@ class TestProcessTrace:
         results_dir = '/path/to/results'
 
         # 関数を呼び出す
-        result = await process_trace(is_win, is_ja, kyoten_name, test_type, index, host, list_expected_route, results_dir)
+        result = await process_trace(is_win, max_hop, kyoten_name, test_type, index, host, list_expected_route, results_dir)
 
         # 戻り値の確認
         assert result == {host: True}
 
         # 呼び出しの確認
-        mock_trace_and_validate.assert_called_once_with(is_win, host, list_expected_route)
+        mock_trace_and_validate.assert_called_once_with(is_win, max_hop, host, list_expected_route)
         mock_save_results.assert_called_once_with(kyoten_name, test_type, index, host, "traceroute output", results_dir, "traceroute")
 
     @mock.patch('script.trace_and_validate')  # trace_and_validate関数をモック
@@ -717,7 +721,7 @@ class TestProcessTrace:
         mock_trace_and_validate.return_value = ("traceroute output", False)
 
         is_win = True
-        is_ja = False
+        max_hop = 10
         kyoten_name = 'Tokyo'
         test_type = 'PingTest'
         index = 1
@@ -726,51 +730,15 @@ class TestProcessTrace:
         results_dir = '/path/to/results'
 
         # 関数を呼び出す
-        result = await process_trace(is_win, is_ja, kyoten_name, test_type, index, host, list_expected_route, results_dir)
+        result = await process_trace(is_win, max_hop, kyoten_name, test_type, index, host, list_expected_route, results_dir)
 
         # 戻り値の確認
         assert result == {host: False}
 
         # 呼び出しの確認
-        mock_trace_and_validate.assert_called_once_with(is_win, host, list_expected_route)
+        mock_trace_and_validate.assert_called_once_with(is_win, max_hop, host, list_expected_route)
         mock_save_results.assert_called_once_with(kyoten_name, test_type, index, host, "traceroute output", results_dir, "traceroute")
         
-# @pytest.mark.asyncio
-# async def test_trace_multiple_hosts():
-#     kyoten_name = "拠点A"
-#     test_type = "テスト"
-#     results_dir = "/dummy_dir"
-
-#     list_trace_eval = [
-#         {"8.8.8.8": ["192.168.1.1", "8.8.8.8"]},
-#         {"1.1.1.1": ["192.168.1.1", "1.1.1.1"]}
-#     ]
-    
-#     expected_results = [
-#         {"8.8.8.8": True},  # process_traceから返される結果
-#         {"1.1.1.1": True}   # process_traceから返される結果
-#     ]
-
-#     # process_traceをモック
-#     with patch('script.process_trace', new_callable=AsyncMock) as mock_process_trace:
-#         # モックの戻り値を設定
-#         mock_process_trace.side_effect = expected_results
-        
-#         # trace_multiple_hosts関数を呼び出す
-#         results = await trace_multiple_hosts(kyoten_name, test_type, list_trace_eval, results_dir)
-
-#         # 結果が期待通りであることを確認
-#         assert results == expected_results
-        
-#         # process_traceが正しい数だけ呼び出されたか確認
-#         assert mock_process_trace.call_count == len(list_trace_eval)
-
-#         # 呼び出しの内容を確認
-#         for index, dict_trace_eval in enumerate(list_trace_eval, start=1):
-#             host = list(dict_trace_eval.keys())[0]
-#             list_expected_route = dict_trace_eval[host]
-#             mock_process_trace.assert_any_call(kyoten_name, test_type, index, host, list_expected_route, results_dir)
-
 @pytest.mark.asyncio
 class TestTraceMultipleHosts:
 
@@ -783,7 +751,7 @@ class TestTraceMultipleHosts:
         ]
 
         is_win = True
-        is_ja = False
+        max_hop = 10
         kyoten_name = 'Tokyo'
         test_type = 'TraceTest'
         list_trace_eval = [
@@ -793,7 +761,7 @@ class TestTraceMultipleHosts:
         results_dir = '/path/to/results'
 
         # 関数を呼び出す
-        results = await trace_multiple_hosts(is_win, is_ja, kyoten_name, test_type, list_trace_eval, results_dir)
+        results = await trace_multiple_hosts(is_win, max_hop, kyoten_name, test_type, list_trace_eval, results_dir)
 
         # 戻り値の確認
         assert results == [{ 'localhost': True }, { 'example.com': True }]
@@ -810,7 +778,7 @@ class TestTraceMultipleHosts:
         ]
 
         is_win = True
-        is_ja = False
+        max_hop = 10
         kyoten_name = 'Tokyo'
         test_type = 'TraceTest'
         list_trace_eval = [
@@ -820,7 +788,7 @@ class TestTraceMultipleHosts:
         results_dir = '/path/to/results'
 
         # 関数を呼び出す
-        results = await trace_multiple_hosts(is_win, is_ja, kyoten_name, test_type, list_trace_eval, results_dir)
+        results = await trace_multiple_hosts(is_win, max_hop, kyoten_name, test_type, list_trace_eval, results_dir)
 
         # 戻り値の確認
         assert results == [{ 'localhost': True }, { 'example.com': False }]
@@ -841,8 +809,9 @@ class TestPingTraceMultipleHosts:
         is_win = True
         is_ja = False
         ping_count = 4
-        max_rtt = 100
+        average_rtt = 100
         max_packet_loss = 10
+        max_hop = 10
         list_ping_eval = [{'localhost': True}, {'example.com': True}]
         list_trace_eval = [{'localhost': ['192.168.1.1']}, {'example.com': ['8.8.8.8']}]
         selected_kyoten_name = 'Tokyo'
@@ -852,8 +821,9 @@ class TestPingTraceMultipleHosts:
             is_win,
             is_ja,
             ping_count,
-            max_rtt,
+            average_rtt,
             max_packet_loss,
+            max_hop,
             list_ping_eval,
             list_trace_eval,
             selected_kyoten_name,
@@ -870,7 +840,7 @@ class TestPingTraceMultipleHosts:
             is_win,
             is_ja,
             ping_count,
-            max_rtt,
+            average_rtt,
             max_packet_loss,
             selected_kyoten_name,
             selected_test_type,
@@ -879,7 +849,7 @@ class TestPingTraceMultipleHosts:
         )
         mock_trace_multiple_hosts.assert_called_once_with(
             is_win,
-            is_ja,
+            max_hop,
             selected_kyoten_name,
             selected_test_type,
             list_trace_eval,
@@ -895,8 +865,9 @@ class TestPingTraceMultipleHosts:
 
         is_win = True
         is_ja = False
+        max_hop = 10,
         ping_count = 4
-        max_rtt = 100
+        average_rtt = 100
         max_packet_loss = 10
         list_ping_eval = [{'localhost': True}, {'example.com': True}]
         list_trace_eval = [{'localhost': ['192.168.1.1']}, {'example.com': ['8.8.8.8']}]
@@ -907,8 +878,9 @@ class TestPingTraceMultipleHosts:
             is_win,
             is_ja,
             ping_count,
-            max_rtt,
+            average_rtt,
             max_packet_loss,
+            max_hop,
             list_ping_eval,
             list_trace_eval,
             selected_kyoten_name,
@@ -925,7 +897,7 @@ class TestPingTraceMultipleHosts:
             is_win,
             is_ja,
             ping_count,
-            max_rtt,
+            average_rtt,
             max_packet_loss,
             selected_kyoten_name,
             selected_test_type,
@@ -934,7 +906,7 @@ class TestPingTraceMultipleHosts:
         )
         mock_trace_multiple_hosts.assert_called_once_with(
             is_win,
-            is_ja,
+            max_hop,
             selected_kyoten_name,
             selected_test_type,
             list_trace_eval,
