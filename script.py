@@ -43,10 +43,20 @@ async def save_results(kyoten_name, test_type, index, host, output, results_dir,
             await f.write(f"{output}")
             await f.write("\n" + "="*60 + "\n")
 
-async def ping(count_opt, ping_count, host):
+# async def ping(count_opt, ping_count, host):
+#     """pingコマンドを非同期で実行"""
+#     proc = await asyncio.create_subprocess_exec(
+#         'ping', count_opt, str(ping_count), host, 
+#         stdout=subprocess.PIPE, 
+#         stderr=subprocess.PIPE
+#     )
+#     stdout, stderr = await proc.communicate()
+#     return stdout.decode() if stdout else stderr.decode()
+
+async def ping(cmd_args):
     """pingコマンドを非同期で実行"""
     proc = await asyncio.create_subprocess_exec(
-        'ping', count_opt, str(ping_count), host, 
+        *cmd_args, 
         stdout=subprocess.PIPE, 
         stderr=subprocess.PIPE
     )
@@ -97,23 +107,65 @@ def parse_rtt(output, pattern):
         return None
 
 # TODO: Windowsでのping判定
-def validate_ping_windows(is_ja, output, max_rtt, max_packet_loss):
-    if is_ja: # 日本語版WindowsのパケットロスとRTT解析
-        packet_loss = parse_packet_loss(output, r'(\d+)% の損失')
-        avg_rtt = parse_rtt(output, r'平均 = (\d+)ms')
+# def validate_ping_windows(expected_status, is_ja, output, max_rtt, max_packet_loss):
+#     if is_ja: # 日本語版WindowsのパケットロスとRTT解析
+#         if expected_status == 'ng':
+#             if "要求がタイムアウトしました" in output or "宛先ホストに到達できません" in output:
+#                 return True
+#             else:
+#                 return False
+#         else:
+#             packet_loss = parse_packet_loss(output, r'(\d+)% の損失')
+#             avg_rtt = parse_rtt(output, r'平均 = (\d+)ms')
         
-    else: # 英語版WindowsのパケットロスとRTT解析
-        packet_loss = parse_packet_loss(output, r'(\d+)% loss')
-        avg_rtt = parse_rtt(output, r'Average = (\d+)ms')
+#     else: # 英語版WindowsのパケットロスとRTT解析
+#         if expected_status == 'ng':
+#             if "Request timed out" in output or "Destination host unreachable" in output:
+#                 return True
+#             else:
+#                 return False
+#         else:
+#             packet_loss = parse_packet_loss(output, r'(\d+)% loss')
+#             avg_rtt = parse_rtt(output, r'Average = (\d+)ms')
     
+#     if packet_loss is None or avg_rtt is None:
+#         return False
+    
+#     # パケットロスとRTTの判定
+#     return evaluate_ping_result(packet_loss, avg_rtt, max_rtt, max_packet_loss)
+
+# TODO: Windowsでのping判定
+def validate_ping_windows(expected_status, is_ja, output, max_rtt, max_packet_loss):
+    error_msgs = {
+        'ja': ["要求がタイムアウトしました", "宛先ホストに到達できません"],
+        'en': ["Request timed out", "Destination host unreachable"]
+    }
+
+    lang = 'ja' if is_ja else 'en'
+
+    if expected_status == 'ng':
+        return any(msg in output for msg in error_msgs[lang])
+
+    packet_loss_pattern = r'(\d+)% の損失' if is_ja else r'(\d+)% loss'
+    avg_rtt_pattern = r'平均 = (\d+)ms' if is_ja else r'Average = (\d+)ms'
+    
+    packet_loss = parse_packet_loss(output, packet_loss_pattern)
+    avg_rtt = parse_rtt(output, avg_rtt_pattern)
+
     if packet_loss is None or avg_rtt is None:
         return False
-     
-    # パケットロスとRTTの判定
+
     return evaluate_ping_result(packet_loss, avg_rtt, max_rtt, max_packet_loss)
 
 # Macでのping判定（言語によってメッセージは変わらない）
-def validate_ping_mac(output, max_rtt, max_packet_loss):
+def validate_ping_mac(expected_status, output, max_rtt, max_packet_loss):
+    # TODO: expected_status が ng かつ ping が通った場合は False とする
+    if expected_status == 'ng':
+        if "Request timeout" in output or "Destination Host Unreachable" in output:
+            return True
+        else:
+            return False
+            
     packet_loss = parse_packet_loss(output, r'(\d+)\.\d+% packet loss')
     avg_rtt = parse_rtt(output, r'round-trip min/avg/max/stddev = [\d.]+/([\d.]+)/[\d.]+/[\d.]+ ms')
     
@@ -123,31 +175,26 @@ def validate_ping_mac(output, max_rtt, max_packet_loss):
     # パケットロスとRTTの判定
     return evaluate_ping_result(packet_loss, avg_rtt, max_rtt, max_packet_loss)
       
-# TODO:pingの出力と期待される結果を比較（Windows版では解析処理を変更する必要あり）
+# pingの出力と期待される結果を比較
 def validate_ping(is_win, is_ja, max_rtt, max_packet_loss, output, expected_status):    
     if output is None:
         return False
-    
-    # TODO: expected_status が ng かつ ping が通った場合は以下の処理へ続く
-    if expected_status == 'ng':
-        if "Request timeout" in output or "Destination Host Unreachable" in output:
-            return True
-        else:
-            return False
         
     # WindowsとMacの解析処理を分岐
     if is_win:
-        return validate_ping_windows(is_ja, output, max_rtt, max_packet_loss)
+        return validate_ping_windows(expected_status, is_ja, output, max_rtt, max_packet_loss)
     else:
-        return validate_ping_mac(output, max_rtt, max_packet_loss)
+        return validate_ping_mac(expected_status, output, max_rtt, max_packet_loss)
 
 # 非同期でホストへpingを送信し、結果を評価する関数
 async def ping_and_validate(is_win, is_ja, ping_count, max_rtt, max_packet_loss, host, expected_status):
-    count_opt = '-n' if is_win else '-c'
+    cmd = 'ping'
+    opt = '-n' if is_win else '-c'
+    cmd_args = [cmd, opt, str(ping_count), host]
         
     """ホストにpingを送信して、結果を評価"""
     print(f"{host} へのpingを確認中...")
-    ping_output = await ping(count_opt, ping_count, host)  # ping関数は非同期で実行
+    ping_output = await ping(cmd_args)  # ping関数は非同期で実行
     print(ping_output)
 
     # pingの結果をバリデート
@@ -330,7 +377,6 @@ def select_test_type(selected_kyoten_type, csv_file='../settings/test_info.csv')
 
     # 指定されたkyoten_typeに基づいて試験タイプを取得
     test_types = df[df['kyoten_type'] == selected_kyoten_type]['test_type'].tolist()
-
     if not test_types:
         print("選択された拠点には試験が設定されていません。")
         return None
