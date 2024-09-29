@@ -10,6 +10,38 @@ import openpyxl
 from openpyxl.styles import PatternFill
 import platform
 import locale
+from ftplib import FTP
+
+class FTPUploader:
+    def __init__(self, host, username, password, ftp_connection=None):
+        """FTPUploaderの初期化。ftp_connectionはモック用"""
+        self.ftp = ftp_connection or FTP(host)  # もし ftp_connection が指定されていない場合、通常のFTP接続を行う
+        self.ftp.login(user=username, passwd=password)
+
+    def make_nested_directories(self, path):
+        dirs = path.split('/')
+        for i in range(1, len(dirs) + 1):
+            current_dir = '/'.join(dirs[:i])
+            try:
+                self.ftp.cwd(current_dir)
+            except:
+                self.ftp.mkd(current_dir)
+
+    def upload_directory(self, local_directory, ftp_directory):
+        # フォルダ作成処理
+        self.make_nested_directories(ftp_directory)
+        
+        for root, dirs, files in os.walk(local_directory):
+            for file in files:
+                local_file_path = os.path.join(root, file)
+                ftp_file_path = os.path.join(ftp_directory, os.path.relpath(local_file_path, local_directory))
+                with open(local_file_path, 'rb') as f:
+                    self.ftp.storbinary(f'STOR {ftp_file_path}', f)
+                    print('FTPでファイルを転送しました。')
+
+    def close(self):
+        self.ftp.quit()
+
 
 def load_config(config_path):
     """
@@ -657,6 +689,21 @@ def main():
         writed_excel_file = write_results_to_excel(ping_results, trace_results, excel_file, df_test_eval)
         format_excel_file(writed_excel_file)
         
+        # FTPにアップロードする
+        # FTPサーバーへの接続情報
+        ftp_host = '127.0.0.1' # test用FTPサーバー
+        ftp_user = 'uname' # anonymous
+        ftp_pass = 'uP@ssw0rd'
+        
+        # local_directory = '/path/to/local/folder'  # アップロードしたいローカルフォルダ
+        # ftp_directory = '/path/on/ftp/server/parent/child/grandchild'  # アップロード先のFTPフォルダ
+        ftp_base_directory = results_dir.partition('results')[2]
+        ftp_directory = os.path.join('/home/ubuntu', ftp_base_directory)
+        # FTPUploaderのインスタンス作成とディレクトリのアップロード
+        uploader = FTPUploader(ftp_host, ftp_user, ftp_pass)
+        uploader.upload_directory(results_dir, ftp_directory)
+        uploader.close()
+    
     except Exception as e:
         print(e)  # エラーメッセージを表示
         return  # 処理を終了
