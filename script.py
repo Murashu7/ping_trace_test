@@ -316,10 +316,10 @@ async def ping_trace_multiple_hosts(is_win, is_ja, ping_count, average_rtt, max_
     trace_results = {}
     
     # ファイルを一階層上の "results/selected_kyoten_name" フォルダに保存
-    results_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', f'results/{selected_kyoten_name}/{selected_test_type}')
+    base_results_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', f'results/{selected_kyoten_name}')
     
-    # フォルダが存在しなければ作成
-    os.makedirs(results_dir, exist_ok=True)
+    # 一意なフォルダを作成
+    results_dir = create_unique_folder(base_results_dir, selected_test_type)
     
     ping_results = await ping_multiple_hosts(is_win, is_ja, ping_count, average_rtt, max_packet_loss, selected_kyoten_name, selected_test_type, list_ping_eval, results_dir)
     trace_results = await trace_multiple_hosts(is_win, max_hop, selected_kyoten_name, selected_test_type, list_trace_eval, results_dir)
@@ -460,6 +460,25 @@ def generate_unique_filename(results_dir, selected_kyoten_name, selected_test_ty
         counter += 1
     
     return excel_file
+
+def create_unique_folder(base_dir, folder_name):
+    """
+    ベースディレクトリに対して、フォルダが存在しない場合はそのまま作成し、
+    存在する場合は (1), (2), ... のように番号をつけてフォルダを作成する関数
+    """
+    folder_path = os.path.join(base_dir, folder_name)
+
+    # フォルダが既に存在する場合、(1), (2), ... のように名前を変更
+    if os.path.exists(folder_path):
+        i = 1
+        while os.path.exists(f"{folder_path}({i})"):
+            i += 1
+        folder_path = f"{folder_path}({i})"
+
+    # フォルダを作成
+    os.makedirs(folder_path, exist_ok=True)
+    
+    return folder_path
 
 # hostをキーにしてnameを取得する関数
 def get_name_by_host(df, host):
