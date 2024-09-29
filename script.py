@@ -25,10 +25,11 @@ def load_config(config_path):
         config = yaml.safe_load(file)
     
     ping_count = config.get('ping_count', 5) # デフォルト値
-    max_rtt = config.get('max_rtt', 100)  # デフォルト値
+    average_rtt = config.get('average_rtt', 100)  # デフォルト値
     max_packet_loss = config.get('max_packet_loss', 20)  # デフォルト値
+    max_hopu = config.get('max_hopu', 10)  # デフォルト値
     
-    return ping_count, max_rtt, max_packet_loss
+    return ping_count, average_rtt, max_packet_loss, max_hopu
 
 # 非同期で結果をログファイルに保存する関数
 async def save_results(kyoten_name, test_type, index, host, output, results_dir, result_type):
@@ -63,11 +64,11 @@ async def ping(cmd_args):
     stdout, stderr = await proc.communicate()
     return stdout.decode() if stdout else stderr.decode()
 
-def evaluate_ping_result(packet_loss, avg_rtt, max_rtt, max_packet_loss):
+def evaluate_ping_result(packet_loss, avg_rtt, average_rtt, max_packet_loss):
     """
     パケットロス率とRTTの結果を判定
     """
-    if packet_loss <= max_packet_loss and avg_rtt <= max_rtt:
+    if packet_loss <= max_packet_loss and avg_rtt <= average_rtt:
         print(f"成功 (パケットロス: {packet_loss}%, 平均RTT: {avg_rtt} ms)")
         return True
     else:
@@ -107,7 +108,7 @@ def parse_rtt(output, pattern):
         return None
 
 # TODO: Windowsでのping判定
-# def validate_ping_windows(expected_status, is_ja, output, max_rtt, max_packet_loss):
+# def validate_ping_windows(expected_status, is_ja, output, average_rtt, max_packet_loss):
 #     if is_ja: # 日本語版WindowsのパケットロスとRTT解析
 #         if expected_status == 'ng':
 #             if "要求がタイムアウトしました" in output or "宛先ホストに到達できません" in output:
@@ -132,10 +133,10 @@ def parse_rtt(output, pattern):
 #         return False
     
 #     # パケットロスとRTTの判定
-#     return evaluate_ping_result(packet_loss, avg_rtt, max_rtt, max_packet_loss)
+#     return evaluate_ping_result(packet_loss, avg_rtt, average_rtt, max_packet_loss)
 
 # TODO: Windowsでのping判定
-def validate_ping_windows(expected_status, is_ja, output, max_rtt, max_packet_loss):
+def validate_ping_windows(expected_status, is_ja, output, average_rtt, max_packet_loss):
     error_msgs = {
         'ja': ["要求がタイムアウトしました", "宛先ホストに到達できません"],
         'en': ["Request timed out", "Destination host unreachable"]
@@ -155,10 +156,10 @@ def validate_ping_windows(expected_status, is_ja, output, max_rtt, max_packet_lo
     if packet_loss is None or avg_rtt is None:
         return False
 
-    return evaluate_ping_result(packet_loss, avg_rtt, max_rtt, max_packet_loss)
+    return evaluate_ping_result(packet_loss, avg_rtt, average_rtt, max_packet_loss)
 
 # Macでのping判定（言語によってメッセージは変わらない）
-def validate_ping_mac(expected_status, output, max_rtt, max_packet_loss):
+def validate_ping_mac(expected_status, output, average_rtt, max_packet_loss):
     # TODO: expected_status が ng かつ ping が通った場合は False とする
     if expected_status == 'ng':
         if "Request timeout" in output or "Destination Host Unreachable" in output:
@@ -173,21 +174,21 @@ def validate_ping_mac(expected_status, output, max_rtt, max_packet_loss):
         return False
      
     # パケットロスとRTTの判定
-    return evaluate_ping_result(packet_loss, avg_rtt, max_rtt, max_packet_loss)
+    return evaluate_ping_result(packet_loss, avg_rtt, average_rtt, max_packet_loss)
       
 # pingの出力と期待される結果を比較
-def validate_ping(is_win, is_ja, max_rtt, max_packet_loss, output, expected_status):    
+def validate_ping(is_win, is_ja, average_rtt, max_packet_loss, output, expected_status):    
     if output is None:
         return False
         
     # WindowsとMacの解析処理を分岐
     if is_win:
-        return validate_ping_windows(expected_status, is_ja, output, max_rtt, max_packet_loss)
+        return validate_ping_windows(expected_status, is_ja, output, average_rtt, max_packet_loss)
     else:
-        return validate_ping_mac(expected_status, output, max_rtt, max_packet_loss)
+        return validate_ping_mac(expected_status, output, average_rtt, max_packet_loss)
 
 # 非同期でホストへpingを送信し、結果を評価する関数
-async def ping_and_validate(is_win, is_ja, ping_count, max_rtt, max_packet_loss, host, expected_status):
+async def ping_and_validate(is_win, is_ja, ping_count, average_rtt, max_packet_loss, host, expected_status):
     cmd = 'ping'
     opt = '-n' if is_win else '-c'
     cmd_args = [cmd, opt, str(ping_count), host]
@@ -198,7 +199,7 @@ async def ping_and_validate(is_win, is_ja, ping_count, max_rtt, max_packet_loss,
     print(ping_output)
 
     # pingの結果をバリデート
-    success = validate_ping(is_win, is_ja, max_rtt, max_packet_loss, ping_output, expected_status)
+    success = validate_ping(is_win, is_ja, average_rtt, max_packet_loss, ping_output, expected_status)
     
     if success:
         print(f"{host} へのpingの判定は成功しました\n")
@@ -208,10 +209,10 @@ async def ping_and_validate(is_win, is_ja, ping_count, max_rtt, max_packet_loss,
     # pingの結果と評価結果を返す
     return ping_output, success
 
-async def process_ping(is_win, is_ja, ping_count, max_rtt, max_packet_loss, kyoten_name, test_type, index, host, expected_status, results_dir):
+async def process_ping(is_win, is_ja, ping_count, average_rtt, max_packet_loss, kyoten_name, test_type, index, host, expected_status, results_dir):
     """個別のホストのpingを処理"""
     # pingを送信して結果を評価
-    ping_output, success = await ping_and_validate(is_win, is_ja,ping_count, max_rtt, max_packet_loss, host, expected_status)
+    ping_output, success = await ping_and_validate(is_win, is_ja,ping_count, average_rtt, max_packet_loss, host, expected_status)
 
     # 結果をログファイルに保存
     await save_results(kyoten_name, test_type, index, host, ping_output, results_dir, 'ping')
@@ -219,12 +220,12 @@ async def process_ping(is_win, is_ja, ping_count, max_rtt, max_packet_loss, kyot
     # 成功/失敗の結果を返す
     return {host: success}
 
-async def ping_multiple_hosts(is_win, is_ja, ping_count, max_rtt, max_packet_loss, kyoten_name, test_type, list_ping_eval, results_dir):
+async def ping_multiple_hosts(is_win, is_ja, ping_count, average_rtt, max_packet_loss, kyoten_name, test_type, list_ping_eval, results_dir):
     tasks = []
     for index, dict_ping_eval in enumerate(list_ping_eval, start=1):
         host = list(dict_ping_eval.keys())[0]
         expected_status = dict_ping_eval[host]
-        task = asyncio.create_task(process_ping(is_win, is_ja, ping_count, max_rtt, max_packet_loss,kyoten_name, test_type, index, host, expected_status, results_dir))
+        task = asyncio.create_task(process_ping(is_win, is_ja, ping_count, average_rtt, max_packet_loss,kyoten_name, test_type, index, host, expected_status, results_dir))
         tasks.append(task)
     return await asyncio.gather(*tasks)
 
@@ -268,9 +269,9 @@ async def traceroute(cmd_args):
     return stdout.decode()
 
 # 非同期でホストへのtracerouteを実行し、結果を評価する関数
-async def trace_and_validate(is_win, host, list_expected_route):
+async def trace_and_validate(is_win, max_hop, host, list_expected_route):
     cmd = 'tracert' if is_win else 'traceroute'
-    opt = '-h 10' if is_win else ('-n', '-m', '10')
+    opt = f'-h {max_hop}' if is_win else ('-n', '-m', str(max_hop))
     cmd_args = [cmd, opt, host]if is_win else [cmd] + list(opt) + [host]
 
     """ホストにtracerouteを実行して、結果を評価"""
@@ -289,10 +290,10 @@ async def trace_and_validate(is_win, host, list_expected_route):
     # tracerouteの結果と評価結果を返す
     return trace_output, success
 
-async def process_trace(is_win, is_ja, kyoten_name, test_type, index, host, list_expected_route, results_dir):
+async def process_trace(is_win, max_hop, kyoten_name, test_type, index, host, list_expected_route, results_dir):
     """個別のホストのtracerouteを処理"""
     # tracerouteを実行して結果を評価
-    trace_output, success = await trace_and_validate(is_win, host, list_expected_route)
+    trace_output, success = await trace_and_validate(is_win, max_hop, host, list_expected_route)
 
     # 結果をログファイルに保存
     await save_results(kyoten_name, test_type, index, host, trace_output, results_dir, "traceroute")
@@ -300,17 +301,17 @@ async def process_trace(is_win, is_ja, kyoten_name, test_type, index, host, list
     # 成功/失敗の結果を返す
     return {host: success}
 
-async def trace_multiple_hosts(is_win, is_ja, kyoten_name, test_type, list_trace_eval, results_dir):
+async def trace_multiple_hosts(is_win, max_hop, kyoten_name, test_type, list_trace_eval, results_dir):
     tasks = []
     for index, dict_trace_eval in enumerate(list_trace_eval, start=1):
         host = list(dict_trace_eval.keys())[0]
         list_expected_route = dict_trace_eval[host]
-        task = asyncio.create_task(process_trace(is_win, is_ja, kyoten_name, test_type, index, host, list_expected_route, results_dir))
+        task = asyncio.create_task(process_trace(is_win, max_hop, kyoten_name, test_type, index, host, list_expected_route, results_dir))
         tasks.append(task)
     
     return await asyncio.gather(*tasks)
 
-async def ping_trace_multiple_hosts(is_win, is_ja, ping_count, max_rtt, max_packet_loss, list_ping_eval, list_trace_eval, selected_kyoten_name, selected_test_type):
+async def ping_trace_multiple_hosts(is_win, is_ja, ping_count, average_rtt, max_packet_loss, max_hop, list_ping_eval, list_trace_eval, selected_kyoten_name, selected_test_type):
     ping_results = {}
     trace_results = {}
     
@@ -320,8 +321,8 @@ async def ping_trace_multiple_hosts(is_win, is_ja, ping_count, max_rtt, max_pack
     # フォルダが存在しなければ作成
     os.makedirs(results_dir, exist_ok=True)
     
-    ping_results = await ping_multiple_hosts(is_win, is_ja, ping_count, max_rtt, max_packet_loss, selected_kyoten_name, selected_test_type, list_ping_eval, results_dir)
-    trace_results = await trace_multiple_hosts(is_win, is_ja, selected_kyoten_name, selected_test_type, list_trace_eval, results_dir)
+    ping_results = await ping_multiple_hosts(is_win, is_ja, ping_count, average_rtt, max_packet_loss, selected_kyoten_name, selected_test_type, list_ping_eval, results_dir)
+    trace_results = await trace_multiple_hosts(is_win, max_hop, selected_kyoten_name, selected_test_type, list_trace_eval, results_dir)
     return ping_results, trace_results, results_dir
 
 # 結果を辞書に変換する関数
@@ -605,7 +606,7 @@ def main():
         is_win, is_ja = check_os_and_language()
             
         # configファイルから設定値の読み込み
-        ping_count, max_rtt, max_packet_loss = load_config(config_path='../settings/setting.yml')
+        ping_count, average_rtt, max_packet_loss, max_hop = load_config(config_path='../settings/setting.yml')
 
         # 拠点リストのファイルの読み込み
         df_kyoten = pd.read_csv('../settings/kyoten_list.csv')
@@ -621,8 +622,9 @@ def main():
             is_win = is_win,
             is_ja = is_ja,
             ping_count = ping_count,
-            max_rtt = max_rtt,
+            average_rtt = average_rtt,
             max_packet_loss = max_packet_loss,
+            max_hop = max_hop,
             list_ping_eval = list_ping_eval,
             list_trace_eval = list_trace_eval,
             selected_kyoten_name = selected_kyoten_name,
@@ -631,6 +633,7 @@ def main():
         print(f'ping_results = {ping_results}')
         print(f'trace_results = {trace_results}')
         
+        # 結果をExcelに書き込む
         excel_file = generate_unique_filename(results_dir, selected_kyoten_name, selected_test_type)
         writed_excel_file = write_results_to_excel(ping_results, trace_results, excel_file, df_test_eval)
         format_excel_file(writed_excel_file)
