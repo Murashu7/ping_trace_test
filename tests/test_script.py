@@ -12,7 +12,7 @@ from script import save_results, extract_ips, check_route_match, validate_ping, 
     traceroute, trace_multiple_hosts, convert_to_list, select_kyoten, select_test_type, get_test_type_path, SelectionError, \
     generate_unique_filename, get_name_by_host, evaluate_ping_result, validate_ping_windows, is_windows, is_mac, UnsupportedOSError, \
     UnsupportedLanguageError, validate_ping_mac, check_os_and_language, is_japanese_os, is_english_os, ping_and_validate, process_ping, \
-    trace_and_validate, process_trace, ping_trace_multiple_hosts
+    trace_and_validate, process_trace, ping_trace_multiple_hosts, create_unique_folder
     
 @pytest.mark.asyncio
 async def test_save_results_ping(tmpdir):
@@ -796,121 +796,90 @@ class TestTraceMultipleHosts:
         # 呼び出しの確認
         assert mock_process_trace.call_count == 2  # 2回呼び出されることを確認
 
+@pytest.fixture
+def mock_os_functions():
+    """
+    os.path.exists と os.makedirs をモックするためのフィクスチャ
+    """
+    with patch('os.path.exists') as mock_exists, patch('os.makedirs') as mock_makedirs:
+        yield mock_exists, mock_makedirs
+
+@pytest.fixture
+def mock_ping_and_trace_functions():
+    """
+    ping_multiple_hosts と trace_multiple_hosts をモックするためのフィクスチャ
+    """
+    with patch('script.ping_multiple_hosts', new_callable=AsyncMock) as mock_ping, \
+         patch('script.trace_multiple_hosts', new_callable=AsyncMock) as mock_trace:
+        yield mock_ping, mock_trace
+
+@pytest.fixture
+def mock_create_unique_folder():
+    """
+    create_unique_folder 関数をモックするためのフィクスチャ
+    """
+    with patch('script.create_unique_folder') as mock_create_folder:
+        yield mock_create_folder
+
 @pytest.mark.asyncio
 class TestPingTraceMultipleHosts:
+    """
+    ping_trace_multiple_hosts 関数に対するテストクラス
+    """
 
-    @mock.patch('script.ping_multiple_hosts')  
-    @mock.patch('script.trace_multiple_hosts')  
-    @mock.patch('os.makedirs')  # os.makedirs をモック
-    async def test_ping_trace_multiple_hosts_success(self, mock_makedirs, mock_trace_multiple_hosts, mock_ping_multiple_hosts):
-        mock_ping_multiple_hosts.return_value = { 'localhost': True, 'example.com': True }
-        mock_trace_multiple_hosts.return_value = [{ 'localhost': True }, { 'example.com': True }]
+    @pytest.fixture(autouse=True)
+    def setup(self, mock_os_functions, mock_ping_and_trace_functions, mock_create_unique_folder):
+        """
+        テストクラスのセットアップとしてモックを適用
+        """
+        self.mock_ping, self.mock_trace = mock_ping_and_trace_functions
+        self.mock_create_unique_folder = mock_create_unique_folder
 
-        is_win = True
-        is_ja = False
-        ping_count = 4
-        average_rtt = 100
-        max_packet_loss = 10
-        max_hop = 10
-        list_ping_eval = [{'localhost': True}, {'example.com': True}]
-        list_trace_eval = [{'localhost': ['192.168.1.1']}, {'example.com': ['8.8.8.8']}]
-        selected_kyoten_name = 'Tokyo'
-        selected_test_type = 'PingTraceTest'
+        # モック関数の戻り値を定義
+        self.mock_ping.return_value = {'host1': 'success', 'host2': 'failure'}
+        self.mock_trace.return_value = {'host1': 'trace_success', 'host2': 'trace_failure'}
+        self.mock_create_unique_folder.return_value = '/dummy/results/unique_folder'
 
+        # テスト用のデフォルト引数
+        self.is_win = True
+        self.is_ja = False
+        self.ping_count = 4
+        self.average_rtt = 100
+        self.max_packet_loss = 10
+        self.max_hop = 30
+        self.list_ping_eval = ['host1', 'host2']
+        self.list_trace_eval = ['host1', 'host2']
+        self.selected_kyoten_name = 'kyoten_test'
+        self.selected_test_type = 'ping_trace_test'
+
+    async def test_ping_trace_multiple_hosts_success(self):
+        """
+        ping_trace_multiple_hosts 関数が正常に動作するかのテスト
+        """
+        # 関数の実行
         ping_results, trace_results, results_dir = await ping_trace_multiple_hosts(
-            is_win,
-            is_ja,
-            ping_count,
-            average_rtt,
-            max_packet_loss,
-            max_hop,
-            list_ping_eval,
-            list_trace_eval,
-            selected_kyoten_name,
-            selected_test_type
+            self.is_win, self.is_ja, self.ping_count, self.average_rtt, self.max_packet_loss, 
+            self.max_hop, self.list_ping_eval, self.list_trace_eval, 
+            self.selected_kyoten_name, self.selected_test_type
         )
 
-        assert ping_results == { 'localhost': True, 'example.com': True }
-        assert trace_results == [{ 'localhost': True }, { 'example.com': True }]
-        
-        expected_results_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '..', f'results/{selected_kyoten_name}/{selected_test_type}')
-        assert results_dir == expected_results_dir
-        
-        mock_ping_multiple_hosts.assert_called_once_with(
-            is_win,
-            is_ja,
-            ping_count,
-            average_rtt,
-            max_packet_loss,
-            selected_kyoten_name,
-            selected_test_type,
-            list_ping_eval,
-            results_dir
-        )
-        mock_trace_multiple_hosts.assert_called_once_with(
-            is_win,
-            max_hop,
-            selected_kyoten_name,
-            selected_test_type,
-            list_trace_eval,
-            results_dir
-        )
+        # 正しい結果が返されるかのアサーション
+        assert ping_results == {'host1': 'success', 'host2': 'failure'}
+        assert trace_results == {'host1': 'trace_success', 'host2': 'trace_failure'}
+        assert results_dir == '/dummy/results/unique_folder'
 
-    @mock.patch('script.ping_multiple_hosts')  
-    @mock.patch('script.trace_multiple_hosts')  
-    @mock.patch('os.makedirs')  # os.makedirs をモック
-    async def test_ping_trace_multiple_hosts_failure(self, mock_makedirs, mock_trace_multiple_hosts, mock_ping_multiple_hosts):
-        mock_ping_multiple_hosts.return_value = { 'localhost': True, 'example.com': False }
-        mock_trace_multiple_hosts.return_value = [{ 'localhost': True }, { 'example.com': False }]
-
-        is_win = True
-        is_ja = False
-        max_hop = 10,
-        ping_count = 4
-        average_rtt = 100
-        max_packet_loss = 10
-        list_ping_eval = [{'localhost': True}, {'example.com': True}]
-        list_trace_eval = [{'localhost': ['192.168.1.1']}, {'example.com': ['8.8.8.8']}]
-        selected_kyoten_name = 'Tokyo'
-        selected_test_type = 'PingTraceTest'
-
-        ping_results, trace_results, results_dir = await ping_trace_multiple_hosts(
-            is_win,
-            is_ja,
-            ping_count,
-            average_rtt,
-            max_packet_loss,
-            max_hop,
-            list_ping_eval,
-            list_trace_eval,
-            selected_kyoten_name,
-            selected_test_type
+        # モックが期待通りに呼ばれているか確認
+        self.mock_ping.assert_called_once_with(
+            self.is_win, self.is_ja, self.ping_count, self.average_rtt, self.max_packet_loss, 
+            self.selected_kyoten_name, self.selected_test_type, self.list_ping_eval, results_dir
         )
-
-        assert ping_results == { 'localhost': True, 'example.com': False }
-        assert trace_results == [{ 'localhost': True }, { 'example.com': False }]
-        
-        expected_results_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '..', f'results/{selected_kyoten_name}/{selected_test_type}')
-        assert results_dir == expected_results_dir
-        
-        mock_ping_multiple_hosts.assert_called_once_with(
-            is_win,
-            is_ja,
-            ping_count,
-            average_rtt,
-            max_packet_loss,
-            selected_kyoten_name,
-            selected_test_type,
-            list_ping_eval,
-            results_dir
+        self.mock_trace.assert_called_once_with(
+            self.is_win, self.max_hop, self.selected_kyoten_name, 
+            self.selected_test_type, self.list_trace_eval, results_dir
         )
-        mock_trace_multiple_hosts.assert_called_once_with(
-            is_win,
-            max_hop,
-            selected_kyoten_name,
-            selected_test_type,
-            list_trace_eval,
-            results_dir
+        self.mock_create_unique_folder.assert_called_once_with(
+            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '..', 'results', self.selected_kyoten_name), 
+            self.selected_test_type
         )
         
 def test_convert_to_list():
@@ -1127,7 +1096,89 @@ class TestGenerateUniqueFilename:
         generated_filename = generate_unique_filename(results_dir, selected_kyoten_name, selected_test_type)
 
         assert generated_filename == expected_filename
-    
+
+@pytest.fixture
+def mock_os_functions():
+    """
+    os.path.exists と os.makedirs をモックするためのフィクスチャ
+    """
+    with patch('os.path.exists') as mock_exists, patch('os.makedirs') as mock_makedirs:
+        yield mock_exists, mock_makedirs
+            
+class TestCreateUniqueFolder:
+
+    def test_create_unique_folder_first_time(self, mock_os_functions):
+        """
+        フォルダが初めて作成される場合のテスト
+        """
+        mock_exists, mock_makedirs = mock_os_functions
+
+        # フォルダが存在しないことをシミュレート
+        mock_exists.return_value = False
+
+        base_dir = "/dummy/base"
+        folder_name = "test_folder"
+
+        # 関数を実行
+        folder_path = create_unique_folder(base_dir, folder_name)
+
+        # 正しいパスが返されることを確認
+        expected_path = os.path.join(base_dir, folder_name)
+        assert folder_path == expected_path
+
+        # makedirs が一度だけ呼ばれていることを確認
+        mock_makedirs.assert_called_once_with(expected_path, exist_ok=True)
+
+
+    def test_create_unique_folder_with_existing_folder(self, mock_os_functions):
+        """
+        フォルダが既に存在する場合、(1), (2), ... のように番号が付くかどうかのテスト
+        """
+        mock_exists, mock_makedirs = mock_os_functions
+
+        # 最初のフォルダは存在するが、(1) は存在しないことをシミュレート
+        mock_exists.side_effect = lambda path: path == os.path.join("/dummy/base", "test_folder")
+
+        base_dir = "/dummy/base"
+        folder_name = "test_folder"
+
+        # 関数を実行
+        folder_path = create_unique_folder(base_dir, folder_name)
+
+        # 正しいパスが返されることを確認
+        expected_path = os.path.join(base_dir, "test_folder(1)")
+        assert folder_path == expected_path
+
+        # makedirs が一度だけ呼ばれていることを確認
+        mock_makedirs.assert_called_once_with(expected_path, exist_ok=True)
+
+
+    def test_create_unique_folder_with_multiple_existing_folders(self, mock_os_functions):
+        """
+        フォルダがすでに複数存在する場合、正しい番号が付くかどうかのテスト
+        """
+        mock_exists, mock_makedirs = mock_os_functions
+
+        # フォルダが test_folder, test_folder(1), test_folder(2) まで存在する場合をシミュレート
+        mock_exists.side_effect = lambda path: path in [
+            os.path.join("/dummy/base", "test_folder"),
+            os.path.join("/dummy/base", "test_folder(1)"),
+            os.path.join("/dummy/base", "test_folder(2)")
+        ]
+
+        base_dir = "/dummy/base"
+        folder_name = "test_folder"
+
+        # 関数を実行
+        folder_path = create_unique_folder(base_dir, folder_name)
+
+        # 正しいパスが返されることを確認
+        expected_path = os.path.join(base_dir, "test_folder(3)")
+        assert folder_path == expected_path
+
+        # makedirs が一度だけ呼ばれていることを確認
+        mock_makedirs.assert_called_once_with(expected_path, exist_ok=True)
+  
 class TestGetNameByHost:
 
     @pytest.fixture
