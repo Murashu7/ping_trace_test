@@ -10,6 +10,37 @@ import openpyxl
 from openpyxl.styles import PatternFill
 import platform
 import locale
+from ftplib import FTP
+
+# 変更前
+class FTPUploader:
+    def __init__(self, host, username, password, ftp_connection=None):
+        """FTPUploaderの初期化。ftp_connectionはモック用"""
+        self.ftp = ftp_connection or FTP(host)  # もし ftp_connection が指定されていない場合、通常のFTP接続を行う
+        self.ftp.login(user=username, passwd=password)
+
+    def make_nested_directories(self, path):
+        dirs = path.split('/')
+        for i in range(1, len(dirs) + 1):
+            current_dir = '/'.join(dirs[:i])
+            try:
+                self.ftp.cwd(current_dir)
+            except:
+                self.ftp.mkd(current_dir)
+
+    def upload_directory(self, local_directory, ftp_directory):
+        # フォルダ作成処理
+        self.make_nested_directories(ftp_directory)
+        
+        for root, dirs, files in os.walk(local_directory):
+            for file in files:
+                local_file_path = os.path.join(root, file)
+                ftp_file_path = os.path.join(ftp_directory, os.path.relpath(local_file_path, local_directory))
+                with open(local_file_path, 'rb') as f:
+                    self.ftp.storbinary(f'STOR {ftp_file_path}', f)
+
+    def close(self):
+        self.ftp.quit()
 
 def load_config(config_path):
     """
@@ -28,8 +59,11 @@ def load_config(config_path):
     average_rtt = config.get('average_rtt', 100)  # デフォルト値
     max_packet_loss = config.get('max_packet_loss', 20)  # デフォルト値
     max_hopu = config.get('max_hopu', 10)  # デフォルト値
+    ftp_host = config.get('ftp_host', '127.0.0.1')  # デフォルト値
+    ftp_user = config.get('ftp_user', 'anonymous')  # デフォルト値
+    ftp_pass = config.get('ftp_pass', '')  # デフォルト値
     
-    return ping_count, average_rtt, max_packet_loss, max_hopu
+    return ping_count, average_rtt, max_packet_loss, max_hopu, ftp_host, ftp_user, ftp_pass
 
 # 非同期で結果をログファイルに保存する関数
 async def save_results(kyoten_name, test_type, index, host, output, results_dir, result_type):
@@ -43,16 +77,6 @@ async def save_results(kyoten_name, test_type, index, host, output, results_dir,
             await f.write(f"{host} への {result_type} 結果 {current_time}\n\n")
             await f.write(f"{output}")
             await f.write("\n" + "="*60 + "\n")
-
-# async def ping(count_opt, ping_count, host):
-#     """pingコマンドを非同期で実行"""
-#     proc = await asyncio.create_subprocess_exec(
-#         'ping', count_opt, str(ping_count), host, 
-#         stdout=subprocess.PIPE, 
-#         stderr=subprocess.PIPE
-#     )
-#     stdout, stderr = await proc.communicate()
-#     return stdout.decode() if stdout else stderr.decode()
 
 async def ping(cmd_args):
     """pingコマンドを非同期で実行"""
@@ -106,34 +130,6 @@ def parse_rtt(output, pattern):
     else:
         print("RTTの解析に失敗しました。")
         return None
-
-# TODO: Windowsでのping判定
-# def validate_ping_windows(expected_status, is_ja, output, average_rtt, max_packet_loss):
-#     if is_ja: # 日本語版WindowsのパケットロスとRTT解析
-#         if expected_status == 'ng':
-#             if "要求がタイムアウトしました" in output or "宛先ホストに到達できません" in output:
-#                 return True
-#             else:
-#                 return False
-#         else:
-#             packet_loss = parse_packet_loss(output, r'(\d+)% の損失')
-#             avg_rtt = parse_rtt(output, r'平均 = (\d+)ms')
-        
-#     else: # 英語版WindowsのパケットロスとRTT解析
-#         if expected_status == 'ng':
-#             if "Request timed out" in output or "Destination host unreachable" in output:
-#                 return True
-#             else:
-#                 return False
-#         else:
-#             packet_loss = parse_packet_loss(output, r'(\d+)% loss')
-#             avg_rtt = parse_rtt(output, r'Average = (\d+)ms')
-    
-#     if packet_loss is None or avg_rtt is None:
-#         return False
-    
-#     # パケットロスとRTTの判定
-#     return evaluate_ping_result(packet_loss, avg_rtt, average_rtt, max_packet_loss)
 
 # TODO: Windowsでのping判定
 def validate_ping_windows(expected_status, is_ja, output, average_rtt, max_packet_loss):
@@ -202,9 +198,9 @@ async def ping_and_validate(is_win, is_ja, ping_count, average_rtt, max_packet_l
     success = validate_ping(is_win, is_ja, average_rtt, max_packet_loss, ping_output, expected_status)
     
     if success:
-        print(f"{host} へのpingの判定は成功しました\n")
+        print(f"{host} への ping の判定は (成功) しました\n")
     else:
-        print(f"{host} へのpingの判定は失敗しました\n")
+        print(f"{host} への ping の判定は (失敗) しました\n")
     
     # pingの結果と評価結果を返す
     return ping_output, success
@@ -342,7 +338,7 @@ def convert_to_list(df):
 
 def select_kyoten(df):
     # 画面に全てのnumberとnameを表示
-    print("全てのnumberとnameを表示します:")
+    print("拠点番号と拠点名を表示します:")
     for index, row in df.iterrows():
         print(f"拠点番号: {row['number']}, {row['area']}, {row['name']}")
 
@@ -357,7 +353,7 @@ def select_kyoten(df):
             selected_row = df[df['number'] == selected_number]
             
             if selected_row.empty:
-                print("選択したnumberは存在しません。もう一度選択してください。")
+                print("選択した拠点番号は存在しません。もう一度選択してください。")
         except ValueError:
             print("無効な入力です。数字を入力してください。")
 
@@ -397,7 +393,7 @@ def select_test_type(selected_kyoten_type, csv_file='../settings/test_info.csv')
             if 1 <= selected_number <= len(test_types):
                 selected_row = test_types[selected_number - 1]
             else:
-                print("選択したnumberは存在しません。もう一度選択してください。")
+                print("選択した試験番号は存在しません。もう一度選択してください。")
         except ValueError:
             print("無効な入力です。数字を入力してください。")
 
@@ -615,7 +611,7 @@ def check_os_and_language():
     elif is_mac():
         pass
     else:
-        raise UnsupportedOSError('サポートされていないOSです。')
+        raise UnsupportedOSError('サポートされていない OS です。')
     
     return is_win, is_ja
      
@@ -625,7 +621,7 @@ def main():
         is_win, is_ja = check_os_and_language()
             
         # configファイルから設定値の読み込み
-        ping_count, average_rtt, max_packet_loss, max_hop = load_config(config_path='../settings/setting.yml')
+        ping_count, average_rtt, max_packet_loss, max_hop, ftp_host, ftp_user, ftp_pass = load_config(config_path='../settings/setting.yml')
 
         # 拠点リストのファイルの読み込み
         df_kyoten = pd.read_csv('../settings/kyoten_list.csv')
@@ -657,6 +653,13 @@ def main():
         writed_excel_file = write_results_to_excel(ping_results, trace_results, excel_file, df_test_eval)
         format_excel_file(writed_excel_file)
         
+        # TODO: 一部試験はFTPでアップロードしない
+        # FTPにアップロードする
+        ftp_directory = results_dir.partition('results')[2]
+        uploader = FTPUploader(ftp_host, ftp_user, ftp_pass)
+        uploader.upload_directory(results_dir, ftp_directory)
+        uploader.close()
+    
     except Exception as e:
         print(e)  # エラーメッセージを表示
         return  # 処理を終了

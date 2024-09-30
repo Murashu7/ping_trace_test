@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, MagicMock
 import os
 import subprocess
 import pandas as pd
@@ -12,8 +12,84 @@ from script import save_results, extract_ips, check_route_match, validate_ping, 
     traceroute, trace_multiple_hosts, convert_to_list, select_kyoten, select_test_type, get_test_type_path, SelectionError, \
     generate_unique_filename, get_name_by_host, evaluate_ping_result, validate_ping_windows, is_windows, is_mac, UnsupportedOSError, \
     UnsupportedLanguageError, validate_ping_mac, check_os_and_language, is_japanese_os, is_english_os, ping_and_validate, process_ping, \
-    trace_and_validate, process_trace, ping_trace_multiple_hosts, create_unique_folder
-    
+    trace_and_validate, process_trace, ping_trace_multiple_hosts, create_unique_folder, FTPUploader
+
+# 変更前
+ftp_host = 'ftp.example.com'
+ftp_user = 'your_username'
+ftp_pass = 'your_password'
+local_directory = '/path/to/local/folder'
+ftp_directory = '/path/on/ftp/server/parent/child/grandchild'
+
+@pytest.fixture
+def mock_ftp():
+    """FTP接続をモックするフィクスチャ"""
+    with patch('ftplib.FTP') as mock_ftp_class:
+        mock_ftp_instance = mock_ftp_class.return_value
+        yield mock_ftp_instance
+
+@pytest.fixture
+def uploader(mock_ftp):
+    """モックされたFTP接続を使って、FTPUploader インスタンスを返すフィクスチャ"""
+    return FTPUploader(ftp_host, ftp_user, ftp_pass, ftp_connection=mock_ftp)
+
+class TestFTPUploader:
+    """FTPUploader クラスのテストクラス"""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, uploader, mock_ftp):
+        """テストクラスのセットアップ"""
+        self.uploader = uploader
+        self.mock_ftp = mock_ftp
+
+    def test_make_nested_directories(self):
+        """make_nested_directoriesメソッドのテスト"""
+        self.mock_ftp.cwd.side_effect = Exception("Directory does not exist")  # 最初の `cwd` が失敗するように設定
+
+        self.uploader.make_nested_directories(ftp_directory)
+
+        # 各階層のディレクトリを作成することを確認
+        self.mock_ftp.mkd.assert_any_call('/path/on/ftp/server/parent')
+        self.mock_ftp.mkd.assert_any_call('/path/on/ftp/server/parent/child')
+        self.mock_ftp.mkd.assert_any_call('/path/on/ftp/server/parent/child/grandchild')
+
+    def test_upload_directory(self):
+        """upload_directoryメソッドのテスト"""
+        # os.walkをモックして、ローカルディレクトリ内のファイルとフォルダをシミュレーション
+        with patch('os.walk') as mock_walk:
+            mock_walk.return_value = [
+                (local_directory, ['subdir'], ['file1.txt', 'file2.txt']),
+                (os.path.join(local_directory, 'subdir'), [], ['file3.txt']),
+            ]
+            # openをモックしてファイル読み込みをシミュレーション
+            with patch('builtins.open', new_callable=MagicMock) as mock_open:
+                mock_file = MagicMock()
+                mock_open.return_value.__enter__.return_value = mock_file
+
+                self.uploader.upload_directory(local_directory, ftp_directory)
+
+                # ファイルがアップロードされたかを確認
+                self.mock_ftp.storbinary.assert_any_call(
+                    'STOR /path/on/ftp/server/parent/child/grandchild/file1.txt', 
+                    mock_file
+                )
+                self.mock_ftp.storbinary.assert_any_call(
+                    'STOR /path/on/ftp/server/parent/child/grandchild/file2.txt', 
+                    mock_file
+                )
+                self.mock_ftp.storbinary.assert_any_call(
+                    'STOR /path/on/ftp/server/parent/child/grandchild/subdir/file3.txt', 
+                    mock_file
+                )
+
+    def test_close(self):
+        """closeメソッドのテスト"""
+        self.uploader.close()
+
+        # FTP接続終了が呼ばれたかを確認
+        self.mock_ftp.quit.assert_called_once()
+
+
 @pytest.mark.asyncio
 async def test_save_results_ping(tmpdir):
     # 一時ディレクトリを作成
@@ -991,7 +1067,7 @@ class TestSelectTestType:
             
             # 出力を確認
             captured = capsys.readouterr()
-            assert "選択したnumberは存在しません。もう一度選択してください。" in captured.out
+            assert "選択した試験番号は存在しません。もう一度選択してください。" in captured.out
             assert "無効な入力です。数字を入力してください。" in captured.out
             assert result == "Test1"  # 正しい入力が最後に来た場合の結果
     
