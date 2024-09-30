@@ -14,7 +14,7 @@ from script import save_results, extract_ips, check_route_match, validate_ping, 
     UnsupportedLanguageError, validate_ping_mac, check_os_and_language, is_japanese_os, is_english_os, ping_and_validate, process_ping, \
     trace_and_validate, process_trace, ping_trace_multiple_hosts, create_unique_folder, FTPUploader
 
-
+# 変更前
 ftp_host = 'ftp.example.com'
 ftp_user = 'your_username'
 ftp_pass = 'your_password'
@@ -1067,7 +1067,7 @@ class TestSelectTestType:
             
             # 出力を確認
             captured = capsys.readouterr()
-            assert "選択したnumberは存在しません。もう一度選択してください。" in captured.out
+            assert "選択した試験番号は存在しません。もう一度選択してください。" in captured.out
             assert "無効な入力です。数字を入力してください。" in captured.out
             assert result == "Test1"  # 正しい入力が最後に来た場合の結果
     
